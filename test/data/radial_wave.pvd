@@ -1,0 +1,25 @@
+<VTKFile type="Collection" version="1.0" byte_order="LittleEndian" header_type="UInt64">
+  <Collection>
+    <DataSet timestep="0" part="0" file="radial_wave/radial_wave_0_0.vtp"/>
+    <DataSet timestep="0.5" part="0" file="radial_wave/radial_wave_0_1.vtp"/>
+    <DataSet timestep="1" part="0" file="radial_wave/radial_wave_0_2.vtp"/>
+    <DataSet timestep="1.5" part="0" file="radial_wave/radial_wave_0_3.vtp"/>
+    <DataSet timestep="2" part="0" file="radial_wave/radial_wave_0_4.vtp"/>
+    <DataSet timestep="2.5" part="0" file="radial_wave/radial_wave_0_5.vtp"/>
+    <DataSet timestep="3" part="0" file="radial_wave/radial_wave_0_6.vtp"/>
+    <DataSet timestep="3.5" part="0" file="radial_wave/radial_wave_0_7.vtp"/>
+    <DataSet timestep="4" part="0" file="radial_wave/radial_wave_0_8.vtp"/>
+    <DataSet timestep="4.5" part="0" file="radial_wave/radial_wave_0_9.vtp"/>
+    <DataSet timestep="5" part="0" file="radial_wave/radial_wave_0_10.vtp"/>
+    <DataSet timestep="5.5" part="0" file="radial_wave/radial_wave_0_11.vtp"/>
+    <DataSet timestep="6" part="0" file="radial_wave/radial_wave_0_12.vtp"/>
+    <DataSet timestep="6.5" part="0" file="radial_wave/radial_wave_0_13.vtp"/>
+    <DataSet timestep="7" part="0" file="radial_wave/radial_wave_0_14.vtp"/>
+    <DataSet timestep="7.5" part="0" file="radial_wave/radial_wave_0_15.vtp"/>
+    <DataSet timestep="8" part="0" file="radial_wave/radial_wave_0_16.vtp"/>
+    <DataSet timestep="8.5" part="0" file="radial_wave/radial_wave_0_17.vtp"/>
+    <DataSet timestep="9" part="0" file="radial_wave/radial_wave_0_18.vtp"/>
+    <DataSet timestep="9.5" part="0" file="radial_wave/radial_wave_0_19.vtp"/>
+    <DataSet timestep="10" part="0" file="radial_wave/radial_wave_0_20.vtp"/>
+  </Collection>
+</VTKFile>

@@ -551,6 +551,17 @@ class TestColorbars:
         assert r.returncode == 0, r.stderr
         assert os.path.isfile(out + ".png")
 
+    # -- --list-colormaps --
+
+    def test_list_colormaps(self, outdir):
+        out = os.path.join(outdir, "out")
+        r = _run("--list-colormaps", "--si", "--time", "1", "--size", str(TEST_WIDTH), outname=out)
+        assert r.returncode == 0, r.stderr
+        assert os.path.isfile(out + ".png")
+        # Verify the header and at least one known preset name appear in stdout
+        assert "Available colormaps" in r.stdout
+        assert "Viridis" in r.stdout
+
     # -- --cb-range --
 
     def test_cb_range_explicit(self, outdir):

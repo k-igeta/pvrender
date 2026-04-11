@@ -192,7 +192,43 @@ pvpython pvrender.py scene.pvsm --cb-data-range-grow 1 2 --cb-sym 1 2 --save-ani
 | `--cb-data-range-clamp N [N …]` | Per-frame: set colorbar N's range to the data range at each time step |
 | `--cb-data-range-grow N [N …]` | Per-frame: grow colorbar N's range monotonically; never shrinks |
 | `--cb-sym N [N …]` | After any `--cb-data-range-*` mode: symmetrize to `[-A, +A]` where `A = max(\|min\|, \|max\|)` |
+| `--list-colormaps` | Print a sorted, numbered list of all available colormap preset names (for use with `--cb-colormap`), then continue |
 | `--cb-colormap N COLORMAP` | Set colorbar N's colormap to a ParaView preset name (case-insensitive). Repeatable. |
+
+**Common colormap choices (case-insensitive):**
+
+<details>
+<summary>Show commonly used colormaps for scientific visualization</summary>
+
+**ParaView Defaults:**
+`Fast`, `Turbo`, `Cool to Warm`, `Cool to Warm (Extended)`, `Black-Body Radiation`,
+`Fast (Blues)`, `Fast (Reds)`, `X Ray`, `Inferno`, `Black, Blue and White`,
+`Blue Orange (divergent)`, `Viridis`, `Cold and Hot`, `Linear Green (Gr4L)`,
+`Rainbow Desaturated`, `Blue - Green - Orange`, `Rainbow Uniform`, `Yellow - Gray - Blue`
+
+**Perceptually uniform sequential:**
+`Viridis`, `Plasma`, `Inferno`, `Magma`, `Cividis`, `Turbo`
+
+**Diverging:**
+`Cool to Warm`, `Cool to Warm (Extended)`, `Warm to Cool`, `Warm to Cool (Extended)`,
+`Blue Orange (divergent)`, `CIELab Blue to Red`, `Cold and Hot`,
+`BrBG`, `PRGn`, `PiYG`, `PuOr`, `BuRd`
+
+**Sequential:**
+`Blues`, `Greens`, `Reds`, `Oranges`, `Purples`, `BuGn`, `BuPu`, `Grayscale`
+
+**Rainbow / multi-hue:**
+`Blue to Red Rainbow`, `Rainbow Desaturated`, `Rainbow Uniform`,
+`Rainbow Blended White`, `Rainbow Blended Black`, `Rainbow Blended Grey`,
+`Spectrum`, `Jet`, `Fast`
+
+**Specialized scientific:**
+`Black-Body Radiation`, `X Ray`, `Gray and Red`,
+`Green-Blue Asymmetric Divergent (62Blbc)`, `Haze`,
+`erdc_iceFire_H`, `erdc_iceFire_L`, `erdc_rainbow_bright`, `erdc_rainbow_dark`,
+`   `
+
+</details>
 
 ### Screenshot (`--save-image` / `--si`)
 

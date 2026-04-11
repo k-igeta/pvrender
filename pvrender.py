@@ -27,7 +27,8 @@ Loads a ParaView statefile.pvsm and optionally sets data file paths
 - Preview interactively:        --interact (-i)
 
 The layout, view, timestep, output size, colorbars, color palettes, and file format are all
-configurable. See --help for the full list of options.
+configurable. Use --list-colormaps to browse all available colormap preset names.
+See --help for the full list of options.
 
 Use `pvbatch` for fully headless/offscreen rendering (e.g. on a server).
 To suppress the render window with `pvpython`, pass `--force-offscreen-rendering` before
@@ -252,6 +253,23 @@ def print_colorbars(colorbars):
         except Exception:
             range_str = "(unknown)"
         print(f"  {i+1:>3}  {cb['array_name']:<30}  {cb['field_assoc']:<8}  {range_str}")
+
+
+def print_colormaps():
+    """Print a sorted, numbered list of all ParaView colormap preset names (for --list-colormaps)."""
+    from paraview import servermanager
+    presets = servermanager.vtkSMTransferFunctionPresets.GetInstance()
+    names = sorted(presets.GetPresetName(i) for i in range(presets.GetNumberOfPresets()))
+    if not names:
+        print("No colormap presets found.")
+        return
+    col_w = max(len(n) for n in names)
+    n_cols = max(1, min(3, 120 // (col_w + 8)))
+    print(f"Available colormaps ({len(names)} total):")
+    for i in range(0, len(names), n_cols):
+        row = names[i:i + n_cols]
+        parts = [f"  {i + j + 1:>3}  {name:<{col_w}}" for j, name in enumerate(row)]
+        print("".join(parts).rstrip())
 
 
 def _get_data_range_at_time(cb, views, t):
@@ -653,6 +671,10 @@ def parse_args():
              "'Cool to Warm', 'Fast', 'Black-Body Radiation', 'Rainbow Desaturated'.",
         nargs=2, metavar=('N', 'COLORMAP'),
         action='append', default=None)
+    g_cb.add_argument('--list-colormaps',
+        help="Print a sorted, numbered list of all available ParaView colormap preset names "
+             "(usable with --cb-colormap), then continue.",
+        action='store_true')
 
     # -- Parse and validate --
     args = parser.parse_args()
@@ -682,6 +704,9 @@ def main():
         outputname += "_" + datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 
     font_scaling = "Do not scale fonts" if args.no_font_scaling else "Scale fonts proportionally"
+
+    if args.list_colormaps:
+        print_colormaps()
 
     # ----------------------------------------------------------------
     # Load state file with modified data file paths

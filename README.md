@@ -5,6 +5,9 @@ with many customizable options.
 
 Automate your scientific visualization workflow, without coding in ParaView's Python API.
 
+Designed to facilite rendering of your ParaView state files with AI agents with a single
+stand-alone script in your project.
+
 ## Motivation
 
 Complex visualizations are easily created in the [ParaView](https://www.paraview.org/)

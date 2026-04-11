@@ -210,12 +210,12 @@ pvpython pvrender.py scene.pvsm --cb-data-range-grow 1 2 --cb-sym 1 2 --save-ani
 
 **ParaView Defaults:**
 `Fast`, `Turbo`, `Cool to Warm`, `Cool to Warm (Extended)`, `Black-Body Radiation`,
-`Fast (Blues)`, `Fast (Reds)`, `X Ray`, `Inferno`, `Black, Blue and White`,
-`Blue Orange (divergent)`, `Viridis`, `Cold and Hot`, `Linear Green (Gr4L)`,
-`Rainbow Desaturated`, `Blue - Green - Orange`, `Rainbow Uniform`, `Yellow - Gray - Blue`
+`X Ray`, `Inferno`, `Black, Blue and White`, `Blue Orange (divergent)`, `Viridis`,
+`Cold and Hot`, `Linear Green (Gr4L)`, `Rainbow Desaturated`, `Blue - Green - Orange`,
+`Rainbow Uniform`, `Yellow - Gray - Blue`
 
 **Perceptually uniform sequential:**
-`Viridis`, `Plasma`, `Inferno`, `Magma`, `Cividis`, `Turbo`
+`Viridis`, `Plasma`, `Inferno`, `Magma`, `Fast (Blues)`, `Fast (Reds)`, `Cividis`, `Turbo`
 
 **Diverging:**
 `Cool to Warm`, `Cool to Warm (Extended)`, `Warm to Cool`, `Warm to Cool (Extended)`,
@@ -233,8 +233,8 @@ pvpython pvrender.py scene.pvsm --cb-data-range-grow 1 2 --cb-sym 1 2 --save-ani
 **Specialized scientific:**
 `Black-Body Radiation`, `X Ray`, `Gray and Red`,
 `Green-Blue Asymmetric Divergent (62Blbc)`, `Haze`,
-`erdc_iceFire_H`, `erdc_iceFire_L`, `erdc_rainbow_bright`, `erdc_rainbow_dark`,
-`   `
+`erdc_iceFire_H`, `erdc_iceFire_L`, `erdc_rainbow_bright`, `erdc_rainbow_dark`
+
 
 </details>
 

@@ -95,6 +95,35 @@ or opens an interactive preview. Multiple outputs can be produced in a single ru
     --cb-colormap N COLORMAP       Set colormap preset name (case-insensitive). Repeatable.
     --cb-discretize N STEPS        Divide colormap into STEPS uniform bands (>= 2). Repeatable.
 
+### Commonly used colormaps
+
+ParaView Defaults:
+    `Fast`, `Turbo`, `Cool to Warm`, `Cool to Warm (Extended)`, `Black-Body Radiation`,
+    `X Ray`, `Inferno`, `Black, Blue and White`, `Blue Orange (divergent)`, `Viridis`,
+    `Cold and Hot`, `Linear Green (Gr4L)`, `Rainbow Desaturated`, `Blue - Green - Orange`,
+    `Rainbow Uniform`, `Yellow - Gray - Blue`
+
+Perceptually uniform sequential:
+    `Viridis`, `Plasma`, `Inferno`, `Magma`, `Fast (Blues)`, `Fast (Reds)`, `Cividis`, `Turbo`
+
+Diverging:
+    `Cool to Warm`, `Cool to Warm (Extended)`, `Warm to Cool`, `Warm to Cool (Extended)`,
+    `Blue Orange (divergent)`, `CIELab Blue to Red`, `Cold and Hot`,
+    `BrBG`, `PRGn`, `PiYG`, `PuOr`, `BuRd`
+
+Sequential:
+    `Blues`, `Greens`, `Reds`, `Oranges`, `Purples`, `BuGn`, `BuPu`, `Grayscale`
+
+Rainbow / multi-hue:
+    `Blue to Red Rainbow`, `Rainbow Desaturated`, `Rainbow Uniform`,
+    `Rainbow Blended White`, `Rainbow Blended Black`, `Rainbow Blended Grey`,
+    `Spectrum`, `Jet`, `Fast`
+
+Specialized scientific:
+    `Black-Body Radiation`, `X Ray`, `Gray and Red`,
+    `Green-Blue Asymmetric Divergent (62Blbc)`, `Haze`,
+    `erdc_iceFire_H`, `erdc_iceFire_L`, `erdc_rainbow_bright`, `erdc_rainbow_dark`
+
 ## Inspection flags (print and continue, do not exit)
 
     --list-layouts                 Print all layouts (index, name, size).

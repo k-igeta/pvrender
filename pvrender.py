@@ -360,6 +360,22 @@ def apply_colorbar_colormaps(args, colorbars):
         lut.ApplyPreset(matched, True)
 
 
+def apply_colorbar_discretize(args, colorbars):
+    """
+    Apply --cb-discretize: enable discrete color banding on the chosen LUTs.
+
+    Sets the LUT's Discretize flag and NumberOfTableValues so the colormap is
+    divided into the requested number of uniform color bands.
+    """
+    if not args.cb_discretize:
+        return
+    for item in args.cb_discretize:
+        n, steps = int(item[0]), int(item[1])
+        lut = colorbars[n - 1]['lut']
+        lut.Discretize = 1
+        lut.NumberOfTableValues = steps
+
+
 def validate_colorbar_args(args, n_colorbars):
     """Validate all --cb-* argument combinations. Raises SystemExit on error."""
     cb_range_indices = set()
@@ -395,7 +411,7 @@ def validate_colorbar_args(args, n_colorbars):
             f"--cb-data-range-* flag"
         )
 
-    # Index bounds (includes --cb-colormap indices)
+    # Index bounds (includes --cb-colormap and --cb-discretize indices)
     colormap_indices = set()
     for item in (args.cb_colormap or []):
         try:
@@ -403,7 +419,20 @@ def validate_colorbar_args(args, n_colorbars):
         except (ValueError, IndexError):
             raise SystemExit(f"error: --cb-colormap: N must be an integer, got {item[0]!r}")
 
-    for n in sorted(cb_range_indices | all_data | sym | colormap_indices):
+    discretize_indices = set()
+    for item in (args.cb_discretize or []):
+        try:
+            discretize_indices.add(int(item[0]))
+        except (ValueError, IndexError):
+            raise SystemExit(f"error: --cb-discretize: N must be an integer, got {item[0]!r}")
+        try:
+            steps = int(item[1])
+        except (ValueError, IndexError):
+            raise SystemExit(f"error: --cb-discretize: STEPS must be an integer, got {item[1]!r}")
+        if steps < 2:
+            raise SystemExit(f"error: --cb-discretize: STEPS must be >= 2, got {steps}")
+
+    for n in sorted(cb_range_indices | all_data | sym | colormap_indices | discretize_indices):
         if n < 1 or n > n_colorbars:
             raise SystemExit(
                 f"error: colorbar index {n} out of range "
@@ -671,6 +700,11 @@ def parse_args():
              "'Cool to Warm', 'Fast', 'Black-Body Radiation', 'Rainbow Desaturated'.",
         nargs=2, metavar=('N', 'COLORMAP'),
         action='append', default=None)
+    g_cb.add_argument('--cb-discretize',
+        help="Divide colorbar N's colormap into STEPS uniform color bands (integer >= 2). "
+             "N is 1-based. Repeatable. Example: --cb-discretize 1 17",
+        nargs=2, metavar=('N', 'STEPS'),
+        action='append', default=None)
     g_cb.add_argument('--list-colormaps',
         help="Print a sorted, numbered list of all available ParaView colormap preset names "
              "(usable with --cb-colormap), then continue.",
@@ -812,6 +846,7 @@ def main():
         print_colorbars(colorbars)
 
     apply_colorbar_colormaps(args, colorbars)
+    apply_colorbar_discretize(args, colorbars)
     apply_static_colorbar_limits(args, colorbars, views_for_cb)
 
     # Precompute per-frame ranges for --cb-data-range-clamp / --cb-data-range-grow.

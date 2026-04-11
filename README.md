@@ -194,6 +194,7 @@ pvpython pvrender.py scene.pvsm --cb-data-range-grow 1 2 --cb-sym 1 2 --save-ani
 | `--cb-sym N [N …]` | After any `--cb-data-range-*` mode: symmetrize to `[-A, +A]` where `A = max(\|min\|, \|max\|)` |
 | `--list-colormaps` | Print a sorted, numbered list of all available colormap preset names (for use with `--cb-colormap`), then continue |
 | `--cb-colormap N COLORMAP` | Set colorbar N's colormap to a ParaView preset name (case-insensitive). Repeatable. |
+| `--cb-discretize N STEPS` | Divide colorbar N's colormap into STEPS uniform color bands (integer ≥ 2). Repeatable. |
 
 **Common colormap choices (case-insensitive):**
 

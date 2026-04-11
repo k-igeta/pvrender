@@ -562,6 +562,41 @@ class TestColorbars:
         assert "Available colormaps" in r.stdout
         assert "Viridis" in r.stdout
 
+    # -- --cb-discretize --
+
+    def test_cb_discretize(self, outdir):
+        out = os.path.join(outdir, "out")
+        r = _run("--cb-discretize", "1", "17",
+                 "--si", "--time", "1", "--size", str(TEST_WIDTH), outname=out)
+        assert r.returncode == 0, r.stderr
+        assert os.path.isfile(out + ".png")
+
+    def test_cb_discretize_256(self, outdir):
+        out = os.path.join(outdir, "out")
+        r = _run("--cb-discretize", "1", "256",
+                 "--si", "--time", "1", "--size", str(TEST_WIDTH), outname=out)
+        assert r.returncode == 0, r.stderr
+        assert os.path.isfile(out + ".png")
+
+    def test_cb_discretize_with_colormap(self, outdir):
+        out = os.path.join(outdir, "out")
+        r = _run("--cb-colormap", "1", "Viridis", "--cb-discretize", "1", "8",
+                 "--si", "--time", "1", "--size", str(TEST_WIDTH), outname=out)
+        assert r.returncode == 0, r.stderr
+        assert os.path.isfile(out + ".png")
+
+    def test_cb_discretize_steps_too_small_fails(self, outdir):
+        out = os.path.join(outdir, "out")
+        r = _run("--cb-discretize", "1", "1",
+                 "--si", "--time", "1", "--size", str(TEST_WIDTH), outname=out)
+        assert r.returncode != 0
+
+    def test_cb_discretize_invalid_index_fails(self, outdir):
+        out = os.path.join(outdir, "out")
+        r = _run("--cb-discretize", "99", "17",
+                 "--si", "--time", "1", "--size", str(TEST_WIDTH), outname=out)
+        assert r.returncode != 0
+
     # -- --cb-range --
 
     def test_cb_range_explicit(self, outdir):

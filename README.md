@@ -5,8 +5,12 @@ with many customizable options.
 
 Automate your scientific visualization workflow, without coding in ParaView's Python API.
 
-Designed to facilite rendering of your ParaView state files with AI agents with a single
-stand-alone script in your project.
+Designed to facilite rendering of your ParaView state files on the command line and with
+AI agents. All you need is:
+
+- Your ParaView state file (`.pvsm`) created in the GUI
+- A ParaView installation (optionally `.../ParaView-x.x.x/bin` available in your `PATH`)
+- This script `pvrender.py` in your project
 
 ## Motivation
 

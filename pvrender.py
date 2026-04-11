@@ -8,31 +8,134 @@ Documentation: https://github.com/k-igeta/pvrender
 
 # Usage
 
-    pvpython pvrender.py <statefile.pvsm> [options]
     pvbatch  pvrender.py <statefile.pvsm> [options]
+    pvpython pvrender.py <statefile.pvsm> [options]
 
-    pvpython pvrender.py statefile.pvsm --help
-    pvpython pvrender.py statefile.pvsm --save-image --suffix
-    pvpython pvrender.py statefile.pvsm --time 1.0 --interact
-    pvpython pvrender.py statefile.pvsm -d /pathto/data/ -o output --save-image --save-animation
-    pvpython pvrender.py statefile.pvsm --filenames "{'reader.pvd': 'pathto/file.pvd'}"
+IMPORTANT: This script must be run with `pvbatch` or `pvpython` from a ParaView
+installation — NOT with a regular `python` interpreter. Use `pvbatch` for headless/
+offscreen rendering (servers, CI). Use `pvpython` for interactive use; add
+`--force-offscreen-rendering` before the script name to suppress the render window.
 
-Loads a ParaView statefile.pvsm and optionally sets data file paths
-(-d / --filenames), then performs any combination of the following actions:
+## What it does
 
-- Save a screenshot:            --save-image  (--si)
-- Save an animation:            --save-animation (--sa)
-- Save pipeline extracts:       --save-extracts  (--se)
-- Save a relocated state file:  --save-state  (--ss)
-- Preview interactively:        --interact (-i)
+Loads a .pvsm state file, optionally remaps data file paths to a new location,
+then saves any combination of outputs (screenshot, animation, extracts, state file)
+or opens an interactive preview. Multiple outputs can be produced in a single run.
 
-The layout, view, timestep, output size, colorbars, color palettes, and file format are all
-configurable. Use --list-colormaps to browse all available colormap preset names.
-See --help for the full list of options.
+## Data path remapping
 
-Use `pvbatch` for fully headless/offscreen rendering (e.g. on a server).
-To suppress the render window with `pvpython`, pass `--force-offscreen-rendering` before
-the script name.
+.pvsm files contain hardcoded absolute data paths. These options redirect them:
+
+    -d, --datadir DIR              Remap all data files to DIR (matched by filename).
+    -f, --filenames DICT           Explicit reader-to-file mapping as a Python dict string:
+                                   "{'ReaderName.pvd': '/new/path/to/file.pvd'}"
+    --restrict-to-datadir          Only load files found inside --datadir; fail on missing.
+
+    -d and --filenames are mutually exclusive.
+
+## Output actions (combine freely)
+
+    --save-image       (--si)      Save a screenshot (PNG by default).
+    --save-animation   (--sa)      Save an animation (MP4 by default).
+    --save-extracts    (--se)      Save pipeline extracts (configured in ParaView GUI).
+    --save-state       (--ss)      Save a .pvsm state file with current (remapped) paths.
+    --interact         (-i)        Open interactive preview window (press q to continue).
+
+## Output path
+
+    -o, --outputname NAME          Base path/name without extension (default: "rendered").
+                                   Directories are created automatically.
+    --suffix                       Append _YYYYMMDD_HHMMSS to prevent overwriting.
+
+## Layout, view, and timing
+
+    --layout INDEX|NAME            Layout by 1-based index or name (default: 1).
+    --view INDEX                   View within layout, 1-based. 0 = all views (default).
+    --time T                       Time step to render (default: last time step).
+    --size W [H]                   Layout size in pixels (default: 1920). One value scales
+                                   width and preserves aspect ratio; two values set exact size.
+    --palette NAME                 Background palette (default: gray).
+                                   Aliases: white, black, gray, darkgray, neutralgray,
+                                   lightgray, gradient.
+
+## Screenshot options
+
+    --image-format FMT             png (default), jpg, bmp, tif, tiff, vtk.
+    --image-resolution W [H]       Override output resolution (independent of --size).
+    --output-palette NAME          Override palette for saved output only.
+    --transparent-background       Transparent background (if format supports it).
+    --no-font-scaling              Disable automatic font scaling for saved outputs.
+
+## Animation options
+
+    --animation-format FMT         mp4 (default), avi, png, jpg, ogv, tif.
+    --framerate N                  Frames per second (default: 30).
+    --frame-start N                Start frame, 0-based (default: 0).
+    --frame-end N                  End frame, 0-based, inclusive. -1 = last (default).
+    --frame-stride N               Frame stride (default: 1).
+    --bitrate N                    MP4 bitrate in bps (auto-estimated if 0 or omitted).
+    --motion-factor F              Factor for bitrate estimation (default: 0.1).
+
+## Colorbar options
+
+    Colorbar index N is always 1-based. Use --list-colorbars to discover indices.
+
+    Range modes (mutually exclusive per colorbar index):
+    --cb-range N MIN MAX           Set a fixed range [MIN, MAX]. Repeatable.
+    --cb-data-range-all N [N...]   Global min/max across all time steps (static).
+    --cb-data-range-clamp N [N...] Per-frame range that tracks data each time step.
+    --cb-data-range-grow N [N...]  Per-frame range that grows monotonically (never shrinks).
+
+    Modifiers:
+    --cb-sym N [N...]              Symmetrize range around zero: [-A, +A] where
+                                   A = max(|min|, |max|). Requires a --cb-data-range-* flag
+                                   for the same index.
+
+    Appearance:
+    --cb-colormap N COLORMAP       Set colormap preset name (case-insensitive). Repeatable.
+    --cb-discretize N STEPS        Divide colormap into STEPS uniform bands (>= 2). Repeatable.
+
+## Inspection flags (print and continue, do not exit)
+
+    --list-layouts                 Print all layouts (index, name, size).
+    --list-views                   Print views in the selected layout.
+    --list-colorbars               Print colorbars (index, array name, current range).
+    --list-colormaps               Print all available colormap preset names.
+
+## Examples
+
+    # Screenshot with data from a different directory
+    pvbatch pvrender.py scene.pvsm -d /data/run_002/ --save-image
+
+    # Custom output name, white background, datetime suffix
+    pvbatch pvrender.py scene.pvsm -o results/stress --si --palette white --suffix
+
+    # Specific time step, exact resolution, JPEG format
+    pvbatch pvrender.py scene.pvsm --si --time 5.0 --size 1920 1080 --image-format jpg
+
+    # Animation at 10 fps, only frames 10 through 50
+    pvbatch pvrender.py scene.pvsm --sa --framerate 10 --frame-start 10 --frame-end 50
+
+    # Screenshot and animation in one run
+    pvbatch pvrender.py scene.pvsm --si --sa -o output/render
+
+    # Fix colorbar 1 to range [0, 500]
+    pvbatch pvrender.py scene.pvsm --cb-range 1 0 500 --si
+
+    # Auto-range from global data, symmetrized around zero
+    pvbatch pvrender.py scene.pvsm --cb-data-range-all 1 --cb-sym 1 --si
+
+    # Per-frame dynamic range for animation
+    pvbatch pvrender.py scene.pvsm --cb-data-range-clamp 1 --sa
+
+    # Change colormap to Viridis with 17 discrete color bands
+    pvbatch pvrender.py scene.pvsm --cb-colormap 1 Viridis --cb-discretize 1 17 --si
+
+    # Explicit reader-to-file mapping
+    pvbatch pvrender.py scene.pvsm -f "{'reader.pvd': '/data/result.pvd'}" --si
+
+    # Discover available colorbars and colormaps
+    pvbatch pvrender.py scene.pvsm --list-colorbars --list-colormaps
 
 # License
 

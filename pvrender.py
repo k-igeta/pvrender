@@ -572,19 +572,37 @@ def validate_colorbar_args(args, n_colorbars):
             )
 
 
+def _disable_auto_rescale(lut):
+    """
+    Force the LUT's AutomaticRescaleRangeMode to "Never".
+
+    Without this, a state file that sets the mode to "Clamp"/"Grow and update
+    every timestep" causes ParaView to re-rescale the LUT on every timestep
+    change, overwriting any range we set via --cb-range / --cb-data-range-*.
+    """
+    try:
+        lut.AutomaticRescaleRangeMode = "Never"
+    except (AttributeError, ValueError):
+        pass
+
+
 def apply_static_colorbar_limits(args, colorbars, views):
     """Apply --cb-range and --cb-data-range-all."""
     sym = set(args.cb_sym)
 
     for item in (args.cb_range or []):
         n, lo, hi = int(item[0]), float(item[1]), float(item[2])
-        colorbars[n - 1]['lut'].RescaleTransferFunction(lo, hi)
+        lut = colorbars[n - 1]['lut']
+        _disable_auto_rescale(lut)
+        lut.RescaleTransferFunction(lo, hi)
 
     for n in args.cb_data_range_all:
         lo, hi = _get_global_data_range(colorbars[n - 1], views)
         if n in sym:
             lo, hi = apply_sym(lo, hi)
-        colorbars[n - 1]['lut'].RescaleTransferFunction(lo, hi)
+        lut = colorbars[n - 1]['lut']
+        _disable_auto_rescale(lut)
+        lut.RescaleTransferFunction(lo, hi)
 
 
 def precompute_dynamic_colorbar_ranges(args, colorbars, views, animation_scene, frame_times):
@@ -604,6 +622,9 @@ def precompute_dynamic_colorbar_ranges(args, colorbars, views, animation_scene, 
     saved_time = animation_scene.TimeKeeper.Time
     ranges  = {}   # {array_name: [[t, lo, hi], ...]}
     running = {}   # for grow: {array_name: (lo, hi)}
+
+    for n in dynamic:
+        _disable_auto_rescale(colorbars[n - 1]['lut'])
 
     for t in frame_times:
         for n in dynamic:

@@ -1404,9 +1404,10 @@ class TestFitCameraIntegration:
 
     def test_fit_same_for_image_and_animation(self, outdir, fixtures):
         # Same frame window for both, so the bounds (and the fit) come from the same frames;
-        # saving the animation must not move the camera per frame.
+        # saving the animation must not move the camera per frame. The screenshot time
+        # (frame 3) is inside the window: a time outside it adds its bounds to the fit.
         img = self._cam(outdir, fixtures, "--fit-camera", "fit", "--si", "--frame-end", "3",
-                        data="data_big", name="img")
+                        "--time", "1.5", data="data_big", name="img")
         ani = self._cam(outdir, fixtures, "--fit-camera", "fit", "--sa",
                         "--animation-format", "png", "--frame-end", "3",
                         data="data_big", name="ani")
@@ -1440,6 +1441,79 @@ class TestFitCameraIntegration:
         assert r.returncode != 0
         assert "--fit-margin" in r.stderr
         assert "Traceback" not in r.stderr
+
+
+@pytestmark_pvbatch
+@pytest.mark.integration
+class TestScreenshotTime:
+    """--save-image renders at the screenshot time T (--time, default EndTime), which can
+    lie outside the frame window: a 'Sequence' scene with NumberOfFrames 1 (states written
+    by pvpython scripts; the window is [StartTime]) or --time outside --frame-*. The
+    screenshot's ranges and camera fit then include T; --save-animation keeps the window's.
+
+    On the main state, frame 1 is t = 0.5 and frame 20 is t = 10 (= EndTime), so the
+    window [1, 1] with T = 10 must match the window {1, 20} (--frame-stride 19)."""
+
+    WINDOW_1 = ("--frame-start", "1", "--frame-end", "1")
+    WINDOW_1_20 = ("--frame-start", "1", "--frame-end", "20", "--frame-stride", "19")
+    SA = ("--sa", "--animation-format", "png")
+
+    def _interp(self, outdir, fixtures, *extra, name="o"):
+        r, rep = _inspect("--keep-path", "probe_points.csv", "--si", "--size", "160", *extra,
+                          outname=os.path.join(outdir, name),
+                          state=os.path.join(fixtures, "interp_state.pvsm"),
+                          datadir=os.path.join(fixtures, "data_adaptive"))
+        assert r.returncode == 0, r.stderr
+        return rep
+
+    def _main(self, outdir, *extra, name, datadir=DATA):
+        r, rep = _inspect("--size", "160", *extra, outname=os.path.join(outdir, name),
+                          datadir=datadir)
+        assert r.returncode == 0, r.stderr
+        return rep
+
+    def test_sequence_scene_clamp_at_screenshot_time(self, outdir, fixtures):
+        # interp_state: 'Sequence', NumberOfFrames 1, so the window is [t = 0]; T = 10
+        rep = self._interp(outdir, fixtures, "--cb-data-range-clamp", "1")
+        assert rep["time"] == pytest.approx(10.0)
+        assert rep["colorbars"][0]["range"] == pytest.approx([-0.9967, 0.9996], abs=1e-4)
+
+    def test_sequence_scene_grow_includes_screenshot_time(self, outdir, fixtures):
+        # union of t = 0 ([-0.9455, 1.0]) and t = 10 ([-0.9967, 0.9996])
+        rep = self._interp(outdir, fixtures, "--cb-data-range-grow", "1")
+        assert rep["colorbars"][0]["range"] == pytest.approx([-0.9967, 1.0], abs=1e-4)
+
+    @pytest.mark.parametrize("mode", ["all", "grow"])
+    def test_plot_range_includes_screenshot_time(self, outdir, mode):
+        # Line chart y: t = 0.5 reaches 0.969, t = 10 reaches 0.9996
+        flags = (f"--plot-data-range-{mode}", "1", "y")
+        img, ref, ani, both = (
+            self._main(outdir, *flags, *extra, name=name)["plots"][0]["axes"]["Left"]
+            for name, extra in (("img", ("--si",) + self.WINDOW_1),
+                                ("ref", self.SA + self.WINDOW_1_20),
+                                ("ani", self.SA + self.WINDOW_1),
+                                ("both", ("--si",) + self.SA + self.WINDOW_1)))
+        assert img["custom"] is True
+        assert img["range"] == pytest.approx(ref["range"], abs=1e-9)
+        assert img["range"][1] > ani["range"][1] + 1e-3
+        # --save-animation keeps the window's range, also after a screenshot outside it
+        assert both["range"] == pytest.approx(ani["range"], abs=1e-9)
+
+    def test_fit_camera_includes_screenshot_time(self, outdir, fixtures):
+        big = os.path.join(fixtures, "data_big")
+        flags = ("--fit-camera", "fit")
+        img = self._main(outdir, *flags, "--si", *self.WINDOW_1, name="img", datadir=big)
+        ref = self._main(outdir, *flags, *self.SA, *self.WINDOW_1_20, name="ref", datadir=big)
+        ani = self._main(outdir, *flags, *self.SA, *self.WINDOW_1, name="ani", datadir=big)
+        both = self._main(outdir, *flags, "--si", *self.SA, *self.WINDOW_1, name="both",
+                          datadir=big)
+        img, ref, ani, both = (rep["cameras"][0] for rep in (img, ref, ani, both))
+        assert img["focal_point"] != pytest.approx(ani["focal_point"], abs=1e-6)
+        for key in ("position", "focal_point", "view_up"):
+            assert img[key] == pytest.approx(ref[key], abs=1e-9), key
+            assert both[key] == pytest.approx(ani[key], abs=1e-9), key
+        assert img["parallel_scale"] == pytest.approx(ref["parallel_scale"], abs=1e-9)
+        assert both["parallel_scale"] == pytest.approx(ani["parallel_scale"], abs=1e-9)
 
 
 @pytestmark_pvbatch

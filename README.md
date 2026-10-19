@@ -355,6 +355,8 @@ To clear a title (`--plot-title`, `--plot-axis-title`, `--cb-title`) pass a sing
 | `--output-palette NAME` | Override background palette for the saved animation only |
 | `--no-font-scaling` | Disable proportional font scaling |
 
+Note: for a scene in `Sequence` mode, ParaView 6.1's SaveAnimation skips frame start + 1 when the window starts after frame 0 (ParaView's own behaviour, not pvrender's).
+
 ### Extracts (`--save-extracts` / `--se`)
 
 | Option | Description |

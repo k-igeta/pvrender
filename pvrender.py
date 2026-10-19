@@ -1038,12 +1038,16 @@ def apply_static_colorbar_limits(args, colorbars, views):
         lut.RescaleTransferFunction(lo, hi)
 
 
-def precompute_dynamic_colorbar_ranges(args, colorbars, views, animation_scene, frame_times):
+def precompute_dynamic_colorbar_ranges(args, colorbars, views, animation_scene, frame_times,
+                                       at_time=None):
     """
     Pre-compute per-frame LUT ranges for --cb-data-range-clamp and --cb-data-range-grow.
 
     Returns None if no dynamic colorbars are requested; otherwise a dict:
         { array_name: [[t, lo, hi], ...] }   (one entry per frame, sorted by t)
+
+    at_time (a screenshot time outside frame_times): clamp uses only at_time, grow the
+    frames before at_time and at_time, so the last entry is the range at at_time.
     """
     clamp   = set(args.cb_data_range_clamp)
     grow    = set(args.cb_data_range_grow)
@@ -1062,7 +1066,7 @@ def precompute_dynamic_colorbar_ranges(args, colorbars, views, animation_scene, 
     for n in sorted(dynamic):
         cb = colorbars[n - 1]
         entries = []
-        for t in frame_times:
+        for t in _frames_up_to(frame_times, at_time, n in grow):
             r = _get_data_range_at_time(cb, views, t)
             if r is None:
                 skipped[n] = skipped.get(n, 0) + 1
@@ -1087,6 +1091,14 @@ def precompute_dynamic_colorbar_ranges(args, colorbars, views, animation_scene, 
 
 
 # -- Per-frame ranges shared by colorbars and plots (one animation cue) --
+
+def _frames_up_to(frame_times, at_time, grow):
+    """The times a range is computed at: frame_times, or for a screenshot time at_time
+    outside them, at_time alone (grow: the frames before at_time, then at_time)."""
+    if at_time is None:
+        return list(frame_times)
+    return [t for t in frame_times if t < at_time] + [at_time] if grow else [at_time]
+
 
 def grow_entries(entries):
     """For [[t, lo, hi], ...] sorted by t, return the running [[t, min lo, max hi], ...]
@@ -1631,7 +1643,7 @@ def _finish_plot_range(lo, hi, sym, log):
     return pad_range(lo, hi, log=log), note
 
 
-def precompute_plot_ranges(specs, plots, frame_times):
+def precompute_plot_ranges(specs, plots, frame_times, at_time=None):
     """
     Compute the --plot-data-range-all/-grow axis ranges over frame_times (main step 9).
 
@@ -1639,6 +1651,8 @@ def precompute_plot_ranges(specs, plots, frame_times):
         static  – {(n, axis): (lo, hi)} for 'all' axes (union over frame_times)
         dynamic – [{'view': registration name, 'axis': axis, 'log': bool,
                     'entries': [[t, lo, hi], ...]}, ...] for 'grow' axes
+    at_time (a screenshot time outside frame_times) is added to the 'all' union; 'grow'
+    then uses the frames before at_time and at_time, so its last entry is at at_time.
     Ranges get --plot-sym, then a 5 % margin (in log space on a log axis). On a log axis a
     computed lower bound <= 0 is clipped to hi / 1000 with a warning. An axis without a
     usable range (no series, no data, min == max) warns and is left as in the state.
@@ -1652,8 +1666,12 @@ def precompute_plot_ranges(specs, plots, frame_times):
         view = plots[n - 1]
         label = f"plot {n} axis {axis}"
         log = s['log'] if s['log'] is not None else bool(getattr(view, axis + 'AxisLogScale', 0))
+        if s['mode'] == 'all' and at_time is not None:
+            times = list(frame_times) + [at_time]
+        else:
+            times = _frames_up_to(frame_times, at_time, True)
         raw = []
-        for t in frame_times:
+        for t in times:
             r = _get_plot_axis_range_at_time(view, axis, t, label)
             if r is not None:
                 raw.append([t, r[0], r[1]])
@@ -1661,8 +1679,8 @@ def precompute_plot_ranges(specs, plots, frame_times):
             warn(f"{label}: no data range found (no visible series on this axis, or their "
                  f"data could not be read); axis left as in state")
             continue
-        if len(raw) < len(frame_times):
-            warn(f"{label}: no data range found in {len(frame_times) - len(raw)} frame(s); "
+        if len(raw) < len(times):
+            warn(f"{label}: no data range found in {len(times) - len(raw)} frame(s); "
                  f"those frames skipped")
         if s['mode'] == 'all':
             entries = [[None, min(e[1] for e in raw), max(e[2] for e in raw)]]
@@ -1893,6 +1911,48 @@ def apply_camera_fit(views, frame_times, mode, margin_pct):
         view.CameraParallelScale = cam['parallel_scale']
         Render(view)  # also resets the clipping range to the visible bounds
     scene.TimeKeeper.Time = saved_time
+
+
+def save_cameras(views):
+    """The camera properties --fit-camera changes, of every render view in views."""
+    return [(view, list(view.CameraPosition), list(view.CameraFocalPoint),
+             float(view.CameraParallelScale))
+            for view in views if view.IsA("vtkSMRenderViewProxy")]
+
+
+def restore_cameras(saved):
+    """Restore cameras saved by save_cameras."""
+    for view, position, focal_point, parallel_scale in saved:
+        view.CameraPosition = position
+        view.CameraFocalPoint = focal_point
+        view.CameraParallelScale = parallel_scale
+        Render(view)  # also resets the clipping range
+
+
+# ----------------------------------------------------------------
+# Screenshot time
+# ----------------------------------------------------------------
+
+def apply_screenshot_time(args, t, frame_times, colorbars, cb_views, plot_specs, plots,
+                          views, cameras_before_fit):
+    """
+    --save-image at a time t outside the frame window (a 'Sequence' scene with
+    NumberOfFrames 1, or --time outside --frame-*): apply the ranges and the camera fit
+    that include t. Clamp: the range at t; grow: the window frames before t, then t;
+    --plot-data-range-all and the --fit-camera bounds: the window plus t. frame_times
+    itself is left alone, so --save-animation keeps the window's ranges.
+    cameras_before_fit: save_cameras() from before the window's fit (with --fit-camera).
+    """
+    scene = GetAnimationScene()
+    cb_ranges = precompute_dynamic_colorbar_ranges(args, colorbars, cb_views, scene,
+                                                   frame_times, at_time=t)
+    static, dynamic = precompute_plot_ranges(plot_specs, plots, frame_times, at_time=t)
+    for (n, axis), (lo, hi) in static.items():
+        apply_plot_axis_range(plots[n - 1], axis, lo, hi)
+    apply_dynamic_ranges_at_time({'colorbars': cb_ranges or {}, 'plots': dynamic}, t)
+    if args.fit_camera:
+        restore_cameras(cameras_before_fit)
+        apply_camera_fit(views, list(frame_times) + [t], args.fit_camera, args.fit_margin)
 
 
 # ----------------------------------------------------------------
@@ -2310,7 +2370,7 @@ def main(argv=None):
 
     # Precompute per-frame ranges for --cb-data-range-clamp / --cb-data-range-grow.
     # Always computed over the animation frame window so that grow accumulates from
-    # frame_start and the nearest-time lookup is consistent for --save-image too.
+    # frame_start; --save-image at a time in the window uses the entry at that time.
     anim_frame_times = (
         frame_times[frame_start : frame_end + 1 : args.frame_stride]
         if frame_times else [animation_scene.TimeKeeper.Time]
@@ -2318,6 +2378,10 @@ def main(argv=None):
     dynamic_ranges = precompute_dynamic_colorbar_ranges(
         args, colorbars, views_for_cb, animation_scene, anim_frame_times
     )
+    # A screenshot time outside the window gets its own ranges and camera fit
+    # (apply_screenshot_time); anim_frame_times stays the window's for --sa/--se
+    shot_time = animation_scene.TimeKeeper.Time
+    shot_apart = bool(args.save_image) and shot_time not in anim_frame_times
 
     # ----------------------------------------------------------------
     # Plots: static settings, data ranges, per-frame precompute
@@ -2340,8 +2404,11 @@ def main(argv=None):
     # Camera fit (once, from the bounds over the same frame window)
     # ----------------------------------------------------------------
 
+    cameras_before_fit = window_cameras = None
     if args.fit_camera:
+        cameras_before_fit = save_cameras(rendered_views)
         apply_camera_fit(rendered_views, anim_frame_times, args.fit_camera, args.fit_margin)
+        window_cameras = save_cameras(rendered_views)
 
     # ----------------------------------------------------------------
     # Postprocessing actions
@@ -2372,8 +2439,11 @@ def main(argv=None):
         file_img = abspath(outputname) + '.' + args.image_format
         os.makedirs(dirname(file_img), exist_ok=True)
 
-        if has_dynamic:
-            apply_dynamic_ranges_at_time(dynamic, animation_scene.TimeKeeper.Time)
+        if shot_apart:
+            apply_screenshot_time(args, shot_time, anim_frame_times, colorbars, views_for_cb,
+                                  plot_specs, plots, rendered_views, cameras_before_fit)
+        elif has_dynamic:
+            apply_dynamic_ranges_at_time(dynamic, shot_time)
 
         print("Saving screenshot to:", file_img)
 
@@ -2383,6 +2453,13 @@ def main(argv=None):
             OverrideColorPalette=args.output_palette,
             TransparentBackground=args.transparent_background,
         )
+
+        if shot_apart and (args.save_animation or args.save_extracts):
+            # Back to the window's plot ranges and camera fit (the cue sets the per-frame ranges)
+            for (n, axis), (lo, hi) in static_plot_ranges.items():
+                apply_plot_axis_range(plots[n - 1], axis, lo, hi)
+            if window_cameras is not None:
+                restore_cameras(window_cameras)
 
     # Save animation
     if args.save_animation:

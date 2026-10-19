@@ -11,6 +11,9 @@ Documentation: https://github.com/k-igeta/pvrender
     pvbatch  pvrender.py <statefile.pvsm> [options]
     pvpython pvrender.py <statefile.pvsm> [options]
 
+Requires ParaView 6.1 or newer (tested with 6.1.0); older versions trigger a warning.
+The compatibility pin is intentional and is not bumped per release.
+
 IMPORTANT: This script must be run with `pvbatch` or `pvpython` from a ParaView
 installation — NOT with a regular `python` interpreter. Use `pvbatch` for headless/
 offscreen rendering (servers, CI). Use `pvpython` for interactive use; add
@@ -30,8 +33,23 @@ or opens an interactive preview. Multiple outputs can be produced in a single ru
     -f, --filenames DICT           Explicit reader-to-file mapping as a Python dict string:
                                    "{'ReaderName.pvd': '/new/path/to/file.pvd'}"
     --restrict-to-datadir          Only load files found inside --datadir; fail on missing.
+    --list-readers                 Print every reader (index, name, used, path), then continue.
+    --keep-path READER             Allow reader READER (see --list-readers) to stay outside
+                                   --datadir, e.g. a shared reference file. Its file must
+                                   still exist. Repeatable; an unknown name is an error.
+    --allow-missing-data           Warn instead of failing on the two checks below.
 
     -d and --filenames are mutually exclusive.
+
+After loading, the readers feeding the rendered layout/view are checked:
+
+    - Missing data: a reader's file, or a file listed in its .pvd, does not exist
+      -> error (reader name and path listed).
+    - Fallback to the template run: with -d DIR, ParaView keeps a reader's original path
+      when its file is not found under DIR, so a run folder missing a file would silently
+      render the template run's data. A reader still pointing outside DIR (any subfolder
+      counts as inside) -> error. Use --keep-path for files that live elsewhere on purpose.
+    - With --filenames, unmapped readers are not an error; only the existence check applies.
 
 ## Output actions (combine freely)
 
@@ -52,8 +70,26 @@ or opens an interactive preview. Multiple outputs can be produced in a single ru
     --layout INDEX|NAME            Layout by 1-based index or name (default: 1).
     --view INDEX                   View within layout, 1-based. 0 = all views (default).
     --time T                       Time step to render (default: last time step).
-    --size W [H]                   Layout size in pixels (default: 1920). One value scales
-                                   width and preserves aspect ratio; two values set exact size.
+    --interp-interval DT           Set the Discrete Time Step Interval of every Temporal
+                                   Interpolator, giving evenly spaced steps (0 = original
+                                   steps). Error if the state has none. Sources that still add
+                                   their own time steps trigger a warning (set "Ignore Time"
+                                   on them in ParaView). Frame indices count the new steps.
+    --size N | W H                 Layout size in pixels (default: 1920). One value sets the
+                                   longest side and preserves aspect ratio; two values set exact size.
+    --fit-camera fit|out           Fit the camera of each rendered 3D view to the visible data
+                                   (bounds over the frame window, computed once; the view
+                                   direction is kept). fit: center on the data and move in or
+                                   out until it just fits. out: only move out (or widen a
+                                   parallel projection) when the data doesn't fit; otherwise
+                                   the state's camera is kept exactly. Warns when a
+                                   representation has a Translation/Scale/Orientation (the fit
+                                   uses the data bounds) or a view shows nothing. Only the
+                                   data bounds are fitted, not annotations (colorbar, axes
+                                   grid labels, text): with a colorbar or axes grid shown,
+                                   use --fit-margin 10 to 20.
+    --fit-margin PCT              Margin on each side for --fit-camera, in percent of the
+                                   view size, 0 <= PCT < 50 (default: 5).
     --palette NAME                 Background palette (default: gray).
                                    Aliases: white, black, gray, darkgray, neutralgray,
                                    lightgray, gradient.
@@ -61,7 +97,8 @@ or opens an interactive preview. Multiple outputs can be produced in a single ru
 ## Screenshot options
 
     --image-format FMT             png (default), jpg, bmp, tif, tiff, vtk.
-    --image-resolution W [H]       Override output resolution (independent of --size).
+    --image-resolution N | W H     Override output resolution (independent of --size). One value
+                                   sets the longest side; two values set exact size.
     --output-palette NAME          Override palette for saved output only.
     --transparent-background       Transparent background (if format supports it).
     --no-font-scaling              Disable automatic font scaling for saved outputs.
@@ -94,6 +131,44 @@ or opens an interactive preview. Multiple outputs can be produced in a single ru
     Appearance:
     --cb-colormap N COLORMAP       Set colormap preset name (case-insensitive). Repeatable.
     --cb-discretize N STEPS        Divide colormap into STEPS uniform bands (>= 2). Repeatable.
+    --cb-title N TEXT              Set the colorbar title. Repeatable. Pass " " (a single space)
+                                   to clear it; "" also works on shells that can pass it, but
+                                   not through pvbatch on Windows.
+
+## Plot options
+
+    Plot index N is 1-based (chart views in layout order); use --list-plots to discover
+    them. AXIS is x|bottom, y|left, right or top (case-insensitive).
+
+    --list-plots                   Print plots (index, type, title, axis settings).
+    --plot-range N AXIS MIN MAX    Fix the axis range to [MIN, MAX]. Repeatable.
+    --plot-data-range-all N AXIS   Axis range = data range over all frames of the frame
+                                   window, applied once.
+    --plot-data-range-grow N AXIS  Per-frame range that grows to include each frame (never
+                                   shrinks); --save-image uses the frame at --time.
+    --plot-auto N AXIS             Automatic axis range (overrides a custom range in the state).
+    --plot-sym N AXIS              Symmetrize around zero; needs a --plot-data-range-* flag
+                                   for the same axis.
+    --plot-log N AXIS on|off       Logarithmic axis scale. A fixed range on a log axis needs
+                                   MIN > 0.
+    --plot-title N TEXT            Set the plot title.
+    --plot-axis-title N AXIS TEXT  Set an axis title.
+
+    To clear a title (--plot-title, --plot-axis-title, --cb-title) pass a single space (" ");
+    an empty string "" also works on shells that can pass it, but not through pvbatch on
+    Windows.
+
+    Range modes are mutually exclusive per plot axis.
+
+    Data ranges (all/grow) come from what the chart draws: for y/left and right the visible
+    series plotted on that axis, for x/bottom and top the X array (or the point/row index)
+    of the series on that axis. A Plot Data Over Time statistics series spans its min()
+    to max() arrays; a block's series ('<array> (id=0)') uses only that block, and is
+    ignored if the chart doesn't show that block. --plot-sym is applied, then 5 % of the
+    span is added on each side (in log space on a log axis). On a log axis a lower bound <= 0 is clipped to max / 1000
+    (warning). An axis with no visible series or a single-valued range warns and keeps
+    its state range. In a parameter study, all/grow fit each run's data; use --plot-range
+    for axes that must be identical across runs.
 
 ### Commonly used colormaps
 
@@ -129,15 +204,28 @@ Specialized scientific:
     --list-layouts                 Print all layouts (index, name, size).
     --list-views                   Print views in the selected layout.
     --list-colorbars               Print colorbars (index, array name, current range).
+    --list-plots                   Print plots (index, type, title, axis settings).
     --list-colormaps               Print all available colormap preset names.
+    --list-readers                 Print all readers (index, name, used, path).
 
 ## Examples
+
+    # Parameter study: one run folder, everything fitted to that run's own data.
+    # Find the indices with --list-colorbars and --list-plots. A missing reader file is an
+    # error (no silent fallback to the template run); --keep-path READER exempts a file
+    # that stays elsewhere on purpose. On Windows write it on one line (or continue with ^ in cmd, a backtick in PowerShell).
+    pvbatch pvrender.py scene.pvsm -d runs/run_042/ -o out/run_042 --suffix --si \\
+        --fit-camera fit --cb-data-range-all 1 --cb-title 1 "Displacement [m]" \\
+        --plot-data-range-all 1 y --plot-title 1 "Displacement, run 042"
 
     # Screenshot with data from a different directory
     pvbatch pvrender.py scene.pvsm -d /data/run_002/ --save-image
 
     # Custom output name, white background, datetime suffix
     pvbatch pvrender.py scene.pvsm -o results/stress --si --palette white --suffix
+
+    # Run folder with a larger model than the template run: move the camera out to fit
+    pvbatch pvrender.py scene.pvsm -d /data/run_005/ --fit-camera out --si
 
     # Specific time step, exact resolution, JPEG format
     pvbatch pvrender.py scene.pvsm --si --time 5.0 --size 1920 1080 --image-format jpg
@@ -190,18 +278,30 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SO
 
 # ParaView setup must precede stdlib imports — pvbatch initialises the
 # rendering backend when these lines execute.
-import paraview
-paraview.compatibility.major = 6
-paraview.compatibility.minor = 1
+# The import is guarded so that plain Python (e.g. the unit tests) can import
+# this module and use the pure helpers.
+try:
+    import paraview
+except ImportError:
+    paraview = None
 
-from paraview.simple import *
-paraview.simple._DisableFirstRenderCameraReset()
+if paraview is not None:
+    paraview.compatibility.major = 6
+    paraview.compatibility.minor = 1
+
+    from paraview.simple import *
+    paraview.simple._DisableFirstRenderCameraReset()
 
 import ast
 import argparse
 import datetime
+import inspect
 import json
+import math
 import os
+import re
+import sys
+import xml.etree.ElementTree as ET
 from os.path import abspath, dirname
 
 # ----------------------------------------------------------------
@@ -238,6 +338,12 @@ _PALETTE_ALIASES = {
 # Functions
 # ----------------------------------------------------------------
 
+def fit_to_box(width, height, n):
+    """Scale (width, height) so its longest side is n, preserving aspect ratio."""
+    scale = n / max(width, height)
+    return max(1, round(width * scale)), max(1, round(height * scale))
+
+
 def estimate_mp4_bitrate(width, height, framerate=30, motion_factor=0.1,
         min_bitrate=200e3, max_bitrate=50e6):
     """
@@ -261,6 +367,109 @@ def estimate_mp4_bitrate(width, height, framerate=30, motion_factor=0.1,
     bitrate = int(round(bitrate / 1e6, 1) * 1e6)
 
     return bitrate
+
+
+def warn(msg):
+    """Print a warning to stderr."""
+    print(f"warning: {msg}", file=sys.stderr)
+
+
+_KNOWN_OUTPUT_EXTS = {'.png', '.jpg', '.jpeg', '.bmp', '.tif', '.tiff', '.vtk',
+                      '.mp4', '.avi', '.ogv', '.pvsm'}
+
+
+def strip_output_extension(name):
+    """Strip a known output extension (case-insensitive); keep other dots (e.g. run_1.5)."""
+    base, ext = os.path.splitext(name)
+    return base if ext.lower() in _KNOWN_OUTPUT_EXTS else name
+
+
+def resolve_layout_index(value, names):
+    """Return the 0-based layout index for a 1-based index or an exact layout name."""
+    value = str(value)
+    try:
+        i = int(value)
+    except ValueError:
+        i = None
+    if i is not None and 1 <= i <= len(names):
+        return i - 1
+    if value in names:
+        return names.index(value)
+    if i is not None:
+        raise SystemExit(f"error: --layout {i} out of range, must be between 1 and {len(names)}")
+    raise SystemExit(f"error: --layout: layout '{value}' not found; available: {names}")
+
+
+def _source_names_by_id():
+    """Map each registered source's global id to its registration name."""
+    return {src.GetGlobalIDAsString(): key[0] for key, src in GetSources().items()}
+
+
+def apply_interp_interval(dt):
+    """Set DiscreteTimeStepInterval on every Temporal Interpolator; return their names."""
+    names = []
+    for key, src in GetSources().items():
+        if src.GetXMLName() == 'TemporalInterpolator':
+            src.DiscreteTimeStepInterval = dt
+            src.UpdatePipelineInformation()  # refreshes TimestepValues and the TimeKeeper
+            names.append(key[0])
+    if not names:
+        raise SystemExit("error: --interp-interval: no Temporal Interpolator in the state")
+    return names
+
+
+def unsuppressed_time_sources():
+    """Names of non-interpolator sources that still contribute time steps to the animation."""
+    keeper = GetTimeKeeper()
+    suppressed = {s.GetGlobalIDAsString() for s in keeper.SuppressedTimeSources}
+    by_id = _source_names_by_id()
+    names = []
+    for src in keeper.TimeSources:
+        sid = src.GetGlobalIDAsString()
+        if sid in suppressed or src.GetXMLName() == 'TemporalInterpolator':
+            continue
+        if len(list(getattr(src, 'TimestepValues', None) or [])) > 0:
+            names.append(by_id.get(sid, src.GetXMLName()))
+    return names
+
+
+def sequence_frame_times(start_time, end_time, n_frames):
+    """Frame times of a 'Sequence' animation: n_frames evenly spaced from start_time to
+    end_time (both included), as ParaView 6.1 plays and saves them."""
+    if n_frames <= 1:
+        return [start_time]
+    step = (end_time - start_time) / (n_frames - 1)
+    return [start_time + i * step for i in range(n_frames)]
+
+
+def animation_frame_times(scene):
+    """Times of all frames of the animation scene, indexed as SaveAnimation's FrameWindow
+    indexes them: the data time steps in 'Snap To TimeSteps' mode (empty for static
+    data), otherwise NumberOfFrames frames from StartTime to EndTime."""
+    if scene.PlayMode == 'Snap To TimeSteps':
+        return list(scene.TimeKeeper.TimestepValues)
+    return sequence_frame_times(scene.StartTime, scene.EndTime, scene.NumberOfFrames)
+
+
+def resolve_frame_window(start, end, stride, n_frames):
+    """Return the validated (start, end) frame window; a negative end means the last frame."""
+    if end < 0:
+        end = n_frames - 1
+    if stride < 1:
+        raise SystemExit(f"error: --frame-stride must be >= 1, got {stride}")
+    if not (0 <= start <= end < n_frames):
+        raise SystemExit(
+            f"error: frame window [{start}, {end}] invalid; need 0 <= start <= end < {n_frames} "
+            f"(the animation has {n_frames} frame{'s' if n_frames != 1 else ''})")
+    return start, end
+
+
+def paraview_version_warning(version):
+    """Return a warning message if version (major, minor) is older than 6.1, else None."""
+    if tuple(version) < (6, 1):
+        return (f"ParaView {version[0]}.{version[1]} detected; pvrender targets ParaView 6.1 "
+                f"or newer and may not work correctly")
+    return None
 
 
 def parse_filenames(filenames_str):
@@ -290,6 +499,207 @@ def parse_filenames(filenames_str):
     return filenames
 
 # ----------------------------------------------------------------
+# Data-path checks
+# ----------------------------------------------------------------
+
+def parse_pvd_files(pvd_path):
+    """Return the absolute paths of every DataSet/@file in a .pvd, resolved relative
+    to the .pvd folder."""
+    base = dirname(abspath(pvd_path))
+    root = ET.parse(pvd_path).getroot()
+    return [abspath(os.path.join(base, ds.get('file')))
+            for ds in root.iter('DataSet') if ds.get('file')]
+
+
+def is_inside_dir(path, directory):
+    """True if path is directory or lies below it (any subfolder). Case-insensitive on
+    Windows, slash-agnostic, relative paths resolved against the cwd."""
+    p = os.path.normcase(abspath(path))
+    d = os.path.normcase(abspath(directory))
+    try:
+        return os.path.commonpath([p, d]) == d
+    except ValueError:  # different drives
+        return False
+
+
+def check_data_paths(readers, datadir, keep):
+    """
+    Check the file paths of the used readers.
+
+    readers: [{'name': str, 'paths': [str], 'used': bool}, ...]
+    Returns (missing, outside), lists of "name: path" messages:
+        missing – paths that don't exist, and files listed in an existing .pvd that don't
+        outside – with datadir set, paths not inside datadir (readers in keep are exempt)
+    """
+    missing, outside = [], []
+    for reader in readers:
+        if not reader['used']:
+            continue
+        name = reader['name']
+        for path in reader['paths']:
+            if not os.path.exists(path):
+                missing.append(f"{name}: {path}")
+            elif path.lower().endswith('.pvd'):
+                try:
+                    members = parse_pvd_files(path)
+                except (ET.ParseError, OSError) as e:
+                    missing.append(f"{name}: {path} (cannot read the .pvd: {e})")
+                    members = []
+                missing.extend(f"{name}: {m}" for m in members if not os.path.exists(m))
+            if datadir is not None and name not in keep and not is_inside_dir(path, datadir):
+                outside.append(f"{name}: {path}")
+    return missing, outside
+
+
+def _input_proxies(proxy):
+    """Return the upstream proxies connected to any InputProperty of proxy (there may be
+    several, e.g. DestinationMesh/SourceDataArrays)."""
+    from paraview import servermanager
+    out = []
+    for name in proxy.ListProperties():
+        prop = proxy.GetProperty(name)
+        if isinstance(prop, servermanager.InputProperty):
+            # items are source proxies (also for output ports > 0)
+            out.extend(item for item in prop if item is not None)
+    return out
+
+
+def existing_representation(source, view):
+    """Return the representation of source (output port 0) already in view, or None.
+    Unlike GetDisplayProperties/GetRepresentation this never creates one."""
+    gid = source.GetGlobalIDAsString()
+    for rep in view.Representations:
+        if 'Input' not in rep.ListProperties():
+            continue
+        src, port = _rep_source(rep)
+        if src is not None and port == 0 and src.GetGlobalIDAsString() == gid:
+            return rep
+    return None
+
+
+def _rep_is_drawn(rep):
+    """True if a representation actually draws something: Visibility on, and for chart
+    representations (which report Visibility 1 for every source) at least one series."""
+    props = rep.ListProperties()
+    if 'Input' not in props or 'Visibility' not in props or not rep.Visibility:
+        return False
+    if 'SeriesVisibility' in props and not list(rep.SeriesVisibility):
+        return False
+    return True
+
+
+def refresh_chart_representations(views, t):
+    """
+    Make the drawn chart representations in views draw the series the state saved.
+
+    Right after LoadState a chart representation of composite data (e.g. Plot Data Over
+    Time) has not seen its input's block hierarchy yet, so its BlockSelectors read a
+    fallback ('/Root' instead of the saved '/Root/id0'). When the input first executes,
+    ParaView restores the saved selection on the proxy but leaves it pending: nothing
+    under pvbatch pushes it to the VTK representation before the image is rendered, so
+    the chart draws none of the saved series. Execute the input at time t, then push the
+    pending (saved) values; no setting is changed and no representation is created.
+    """
+    for view in views:
+        for rep in view.Representations:
+            props = rep.ListProperties()
+            if 'SeriesVisibility' not in props or not _rep_is_drawn(rep):
+                continue
+            src, _ = _rep_source(rep)
+            if src is None:
+                continue
+            src.UpdatePipeline(t)
+            rep.SMProxy.UpdateVTKObjects()
+
+
+def find_readers(views):
+    """
+    Return every reader in the pipeline (a source with a FileName or FileNames property):
+        [{'name': registration name, 'paths': [str], 'used': bool}, ...]
+    used is True when the reader is upstream of a drawn representation in views.
+    """
+    upstream = set()
+    stack = []
+    for view in views:
+        for rep in view.Representations:
+            if _rep_is_drawn(rep):
+                stack.extend(_input_proxies(rep))
+    while stack:
+        proxy = stack.pop()
+        gid = proxy.GetGlobalIDAsString()
+        if gid in upstream:
+            continue
+        upstream.add(gid)
+        stack.extend(_input_proxies(proxy))
+
+    readers = []
+    for key, src in GetSources().items():
+        props = src.ListProperties()
+        file_props = [p for p in ('FileName', 'FileNames') if p in props]
+        if not file_props:
+            continue
+        name = key[0] if isinstance(key, tuple) and key else None
+        if not isinstance(name, str) or not name:
+            raise SystemExit(
+                f"error: cannot determine the registration name of reader "
+                f"{src.GetXMLName()} (key {key!r})")
+        paths = []
+        for p in file_props:
+            value = src.GetPropertyValue(p)
+            values = [value] if isinstance(value, str) else list(value or [])
+            paths.extend(str(v) for v in values if v)
+        readers.append({'name': name, 'paths': paths,
+                        'used': src.GetGlobalIDAsString() in upstream})
+    return readers
+
+
+def print_readers(readers):
+    """Print a summary table of readers (for --list-readers)."""
+    if not readers:
+        print("No readers found.")
+        return
+    name_w = max(30, max(len(r['name']) for r in readers))
+    print(f"  {'#':>3}  {'Name':<{name_w}}  {'Used':<4}  Path")
+    print(f"  {'---':>3}  {'-'*name_w}  {'-'*4}  {'-'*30}")
+    for i, r in enumerate(readers):
+        used = 'yes' if r['used'] else 'no'
+        paths = r['paths'] or ['(none)']
+        print(f"  {i+1:>3}  {r['name']:<{name_w}}  {used:<4}  {paths[0]}")
+        for path in paths[1:]:
+            print(f"  {'':>3}  {'':<{name_w}}  {'':<4}  {path}")
+
+
+def check_readers(args, views, datadir):
+    """--list-readers, --keep-path validation and the data-path checks (main step 4)."""
+    readers = find_readers(views)
+    if args.list_readers:
+        print_readers(readers)
+
+    names = [r['name'] for r in readers]
+    unknown = [n for n in args.keep_path if n not in names]
+    if unknown:
+        raise SystemExit(
+            f"error: --keep-path: no reader named {', '.join(repr(n) for n in unknown)}; "
+            f"available: {names} (see --list-readers)")
+
+    missing, outside = check_data_paths(readers, datadir, set(args.keep_path))
+    msg_missing = "data files not found:\n  " + "\n  ".join(missing)
+    msg_outside = (
+        "readers still point outside --datadir (the file was not found there, so ParaView "
+        "kept the state's original path):\n  " + "\n  ".join(outside) +
+        "\n  Use --keep-path NAME for files that intentionally live elsewhere.")
+    if args.allow_missing_data:
+        if missing:
+            warn(msg_missing)
+        if outside:
+            warn(msg_outside)
+        return
+    if missing:
+        raise SystemExit("error: " + msg_missing)
+    if outside:
+        raise SystemExit("error: " + msg_outside)
+
+# ----------------------------------------------------------------
 # Colorbar helpers
 # ----------------------------------------------------------------
 
@@ -315,7 +725,7 @@ def enumerate_colorbars(views):
         if not view.IsA("vtkSMRenderViewProxy"):
             continue
         for source in GetSources().values():
-            rep = GetDisplayProperties(source, view)
+            rep = existing_representation(source, view)
             if rep is None:
                 continue
             try:
@@ -405,17 +815,18 @@ def print_colormaps():
 
 
 def _get_data_range_at_time(cb, views, t):
-    """Return (min, max) of cb's array at time t across all visible representations."""
+    """Return (min, max) of cb's array at time t across all visible representations,
+    or None if no range could be found."""
     GetAnimationScene().TimeKeeper.Time = t
     lo, hi = float('inf'), float('-inf')
     array_name = cb['array_name']
     field_assoc = cb['field_assoc']
-    sources = list(GetSources().values())
+    sources = list(GetSources().items())
     for view in views:
         if not view.IsA("vtkSMRenderViewProxy"):
             continue
-        for source in sources:
-            rep = GetDisplayProperties(source, view)
+        for (source_name, _id), source in sources:
+            rep = existing_representation(source, view)
             if rep is None:
                 continue
             try:
@@ -439,23 +850,25 @@ def _get_data_range_at_time(cb, views, t):
                     r = arr_info.GetComponentRange(-1)
                     lo = min(lo, r[0])
                     hi = max(hi, r[1])
-            except Exception:
-                pass
-    return (0.0, 1.0) if lo == float('inf') else (lo, hi)
+            except Exception as e:
+                warn(f"cannot read range of '{array_name}' from '{source_name}': {e}")
+    return None if lo == float('inf') else (lo, hi)
 
 
 def _get_global_data_range(cb, views):
-    """Return global (min, max) of cb's array over all animation time steps."""
+    """Return global (min, max) of cb's array over all animation time steps, or None."""
     scene = GetAnimationScene()
     saved_time = scene.TimeKeeper.Time
     times = list(scene.TimeKeeper.TimestepValues) or [saved_time]
     glo, ghi = float('inf'), float('-inf')
     for t in times:
-        lo, hi = _get_data_range_at_time(cb, views, t)
-        glo = min(glo, lo)
-        ghi = max(ghi, hi)
+        r = _get_data_range_at_time(cb, views, t)
+        if r is None:
+            continue
+        glo = min(glo, r[0])
+        ghi = max(ghi, r[1])
     scene.TimeKeeper.Time = saved_time
-    return glo, ghi
+    return None if glo == float('inf') else (glo, ghi)
 
 
 def apply_colorbar_colormaps(args, colorbars):
@@ -516,6 +929,13 @@ def validate_colorbar_args(args, n_colorbars):
             cb_range_indices.add(int(item[0]))
         except (ValueError, IndexError):
             raise SystemExit(f"error: --cb-range: N must be an integer, got {item[0]!r}")
+        try:
+            lo, hi = float(item[1]), float(item[2])
+        except (ValueError, IndexError):
+            raise SystemExit(
+                f"error: --cb-range: MIN and MAX must be numbers, got {item[1:3]!r}")
+        if not lo < hi:
+            raise SystemExit(f"error: --cb-range: MIN must be less than MAX, got {lo} {hi}")
 
     data_all   = set(args.cb_data_range_all)
     data_clamp = set(args.cb_data_range_clamp)
@@ -564,7 +984,15 @@ def validate_colorbar_args(args, n_colorbars):
         if steps < 2:
             raise SystemExit(f"error: --cb-discretize: STEPS must be >= 2, got {steps}")
 
-    for n in sorted(cb_range_indices | all_data | sym | colormap_indices | discretize_indices):
+    title_indices = set()
+    for item in (args.cb_title or []):
+        try:
+            title_indices.add(int(item[0]))
+        except (ValueError, IndexError):
+            raise SystemExit(f"error: --cb-title: N must be an integer, got {item[0]!r}")
+
+    for n in sorted(cb_range_indices | all_data | sym | colormap_indices | discretize_indices
+                    | title_indices):
         if n < 1 or n > n_colorbars:
             raise SystemExit(
                 f"error: colorbar index {n} out of range "
@@ -597,7 +1025,12 @@ def apply_static_colorbar_limits(args, colorbars, views):
         lut.RescaleTransferFunction(lo, hi)
 
     for n in args.cb_data_range_all:
-        lo, hi = _get_global_data_range(colorbars[n - 1], views)
+        r = _get_global_data_range(colorbars[n - 1], views)
+        if r is None:
+            warn(f"colorbar {n}: no data range found for '{colorbars[n - 1]['array_name']}'; "
+                 f"range left as in state")
+            continue
+        lo, hi = r
         if n in sym:
             lo, hi = apply_sym(lo, hi)
         lut = colorbars[n - 1]['lut']
@@ -621,60 +1054,96 @@ def precompute_dynamic_colorbar_ranges(args, colorbars, views, animation_scene, 
 
     saved_time = animation_scene.TimeKeeper.Time
     ranges  = {}   # {array_name: [[t, lo, hi], ...]}
-    running = {}   # for grow: {array_name: (lo, hi)}
+    skipped = {}   # {n: number of frames without a range}
 
     for n in dynamic:
         _disable_auto_rescale(colorbars[n - 1]['lut'])
 
-    for t in frame_times:
-        for n in dynamic:
-            cb  = colorbars[n - 1]
-            arr = cb['array_name']
-            lo, hi = _get_data_range_at_time(cb, views, t)
-
-            if n in grow:
-                if arr not in running:
-                    running[arr] = (lo, hi)
-                else:
-                    rlo, rhi = running[arr]
-                    running[arr] = (min(rlo, lo), max(rhi, hi))
-                lo, hi = running[arr]
-
-            if n in sym:
-                lo, hi = apply_sym(lo, hi)
-
-            ranges.setdefault(arr, []).append([t, lo, hi])
+    for n in sorted(dynamic):
+        cb = colorbars[n - 1]
+        entries = []
+        for t in frame_times:
+            r = _get_data_range_at_time(cb, views, t)
+            if r is None:
+                skipped[n] = skipped.get(n, 0) + 1
+                continue
+            entries.append([t, r[0], r[1]])
+        if n in grow:
+            entries = grow_entries(entries)
+        if n in sym:
+            entries = [[t, *apply_sym(lo, hi)] for t, lo, hi in entries]
+        if entries:
+            ranges.setdefault(cb['array_name'], []).extend(entries)
 
     animation_scene.TimeKeeper.Time = saved_time
+    for n in sorted(skipped):
+        arr = colorbars[n - 1]['array_name']
+        if arr not in ranges:
+            warn(f"colorbar {n}: no data range found for '{arr}'; range left as in state")
+        else:
+            warn(f"colorbar {n}: no data range found for '{arr}' in {skipped[n]} frame(s); "
+                 f"those frames skipped")
     return ranges
 
 
-def apply_dynamic_colorbar_ranges_at_time(dynamic_ranges, t):
-    """Apply precomputed dynamic ranges at time t (nearest-time lookup)."""
-    for array_name, entries in dynamic_ranges.items():
+# -- Per-frame ranges shared by colorbars and plots (one animation cue) --
+
+def grow_entries(entries):
+    """For [[t, lo, hi], ...] sorted by t, return the running [[t, min lo, max hi], ...]
+    (the range never shrinks). The input is not modified."""
+    out = []
+    for t, lo, hi in entries:
+        if out:
+            lo, hi = min(out[-1][1], lo), max(out[-1][2], hi)
+        out.append([t, lo, hi])
+    return out
+
+
+def apply_dynamic_ranges_at_time(dynamic, t):
+    """
+    Apply the precomputed per-frame ranges at time t (nearest-time entry).
+
+    dynamic = {'colorbars': {array_name: [[t, lo, hi], ...]},
+               'plots': [{'view': registration name, 'axis': 'Left', 'log': bool,
+                          'entries': [[t, lo, hi], ...]}, ...]}
+
+    The source of this function is also embedded in the animation cue script
+    (build_dynamic_cue), so it must be self-contained: no module-level names.
+    """
+    from paraview.simple import FindView, GetColorTransferFunction
+    for array_name, entries in dynamic.get('colorbars', {}).items():
         best = min(entries, key=lambda e: abs(e[0] - t))
         GetColorTransferFunction(array_name).RescaleTransferFunction(best[1], best[2])
+    for plot in dynamic.get('plots', []):
+        view = FindView(plot['view'])
+        if view is None:
+            continue
+        best = min(plot['entries'], key=lambda e: abs(e[0] - t))
+        axis = plot['axis']
+        setattr(view, axis + 'AxisUseCustomRange', 1)
+        setattr(view, axis + 'AxisRangeMinimum', best[1])
+        setattr(view, axis + 'AxisRangeMaximum', best[2])
 
 
-def build_dynamic_colorbar_cue(dynamic_ranges, animation_scene):
+def build_dynamic_cue(dynamic, animation_scene):
     """
-    Register a PythonAnimationCue that applies precomputed per-frame LUT ranges.
+    Register one PythonAnimationCue that applies the precomputed per-frame colorbar and
+    plot ranges (see apply_dynamic_ranges_at_time) on every tick.
     Returns the cue proxy; remove it from animation_scene.Cues after SaveAnimation.
     """
-    ranges_json = json.dumps(dynamic_ranges)
+    # The cue script runs in its own context: embed the data and the apply function.
     cue_script = f"""\
 import json as _json
-_ranges = _json.loads({repr(ranges_json)})
+_dynamic = _json.loads({json.dumps(dynamic)!r})
+
+{inspect.getsource(apply_dynamic_ranges_at_time)}
 
 def start_cue(self):
     pass
 
 def tick(self):
-    from paraview.simple import GetAnimationScene, GetColorTransferFunction
-    t = GetAnimationScene().TimeKeeper.Time
-    for array_name, entries in _ranges.items():
-        best = min(entries, key=lambda e: abs(e[0] - t))
-        GetColorTransferFunction(array_name).RescaleTransferFunction(best[1], best[2])
+    from paraview.simple import GetAnimationScene
+    apply_dynamic_ranges_at_time(_dynamic, GetAnimationScene().TimeKeeper.Time)
 
 def end_cue(self):
     pass
@@ -686,10 +1155,751 @@ def end_cue(self):
 
 
 # ----------------------------------------------------------------
+# Plots (chart views): axis ranges, log scale, titles
+# ----------------------------------------------------------------
+
+_AXIS_ALIASES = {'x': 'Bottom', 'bottom': 'Bottom', 'y': 'Left', 'left': 'Left',
+                 'top': 'Top', 'right': 'Right'}
+_AXES = ('Bottom', 'Left', 'Right', 'Top')
+
+
+def normalize_axis(name):
+    """Map x/y/bottom/left/top/right (case-insensitive) to the ParaView axis name.
+    Raises SystemExit on an unknown name."""
+    try:
+        return _AXIS_ALIASES[str(name).strip().lower()]
+    except KeyError:
+        raise SystemExit(f"error: unknown plot axis {name!r} "
+                         f"(use one of: x, y, bottom, left, right, top)")
+
+
+def enumerate_plots(views):
+    """Return the chart views (those with axis properties) in the given order."""
+    return [v for v in views if 'LeftAxisUseCustomRange' in v.ListProperties()]
+
+
+def print_plots(plots):
+    """Print a summary of the plots (for --list-plots)."""
+    if not plots:
+        print("No plots found.")
+        return
+    for i, view in enumerate(plots):
+        title = getattr(view, 'ChartTitle', '')
+        print(f"  {i+1:>3}  {view.GetXMLName():<20}  title: {title!r}")
+        for ax in _AXES:
+            custom = bool(getattr(view, ax + 'AxisUseCustomRange', False))
+            lo = getattr(view, ax + 'AxisRangeMinimum', 0.0)
+            hi = getattr(view, ax + 'AxisRangeMaximum', 0.0)
+            log = bool(getattr(view, ax + 'AxisLogScale', False))
+            print(f"         {ax:<7} custom {'on' if custom else 'off':<3}  "
+                  f"[{lo:.6g}, {hi:.6g}]  log {'on' if log else 'off'}")
+
+
+def normalize_title(text):
+    """A blank (empty or whitespace-only) title text means "clear the title" -> "".
+    pvbatch on Windows cannot receive an empty argument, so a single space is the way to
+    clear a title there. Non-blank text is returned unchanged."""
+    return '' if not text.strip() else text
+
+
+def _plot_index(flag, text, n_plots):
+    try:
+        n = int(text)
+    except (TypeError, ValueError):
+        raise SystemExit(f"error: {flag}: N must be an integer, got {text!r}")
+    if n < 1 or n > n_plots:
+        raise SystemExit(f"error: {flag}: plot index {n} out of range "
+                         f"(found {n_plots} plot{'s' if n_plots != 1 else ''})")
+    return n
+
+
+def _plot_number(flag, text):
+    try:
+        return float(text)
+    except (TypeError, ValueError):
+        raise SystemExit(f"error: {flag}: MIN and MAX must be numbers, got {text!r}")
+
+
+def build_plot_specs(args, n_plots):
+    """Validate the --plot-* flags and return {(n, axis): spec}. spec is
+    {'mode': 'fixed'|'all'|'grow'|'auto'|None, 'min', 'max', 'sym', 'log', 'title'}.
+    Plot-title indices are validated here too (see build_chart_titles)."""
+    specs = {}
+
+    def spec(flag, n_text, axis_text):
+        n = _plot_index(flag, n_text, n_plots)
+        key = (n, normalize_axis(axis_text))
+        return key, specs.setdefault(key, {'mode': None, 'min': None, 'max': None,
+                                           'sym': False, 'log': None, 'title': None})
+
+    def set_mode(flag, key, s, mode):
+        if s['mode'] is not None and s['mode'] != mode:
+            raise SystemExit(f"error: plot {key[0]} axis {key[1]}: {flag} conflicts with "
+                             f"another range mode ({s['mode']}); use only one per axis")
+        s['mode'] = mode
+
+    for item in (args.plot_range or []):
+        key, s = spec('--plot-range', item[0], item[1])
+        lo = _plot_number('--plot-range', item[2])
+        hi = _plot_number('--plot-range', item[3])
+        if not lo < hi:
+            raise SystemExit(f"error: --plot-range: MIN must be less than MAX, got {lo:g} {hi:g}")
+        set_mode('--plot-range', key, s, 'fixed')
+        s['min'], s['max'] = lo, hi
+    for flag, attr, mode in (('--plot-data-range-all', 'plot_data_range_all', 'all'),
+                             ('--plot-data-range-grow', 'plot_data_range_grow', 'grow'),
+                             ('--plot-auto', 'plot_auto', 'auto')):
+        for item in (getattr(args, attr) or []):
+            key, s = spec(flag, item[0], item[1])
+            set_mode(flag, key, s, mode)
+    for item in (args.plot_sym or []):
+        key, s = spec('--plot-sym', item[0], item[1])
+        s['sym'] = True
+    for item in (args.plot_log or []):
+        key, s = spec('--plot-log', item[0], item[1])
+        if item[2].lower() not in ('on', 'off'):
+            raise SystemExit(f"error: --plot-log: state must be on or off, got {item[2]!r}")
+        s['log'] = item[2].lower() == 'on'
+    for item in (args.plot_axis_title or []):
+        key, s = spec('--plot-axis-title', item[0], item[1])
+        s['title'] = normalize_title(item[2])
+    for item in (args.plot_title or []):
+        _plot_index('--plot-title', item[0], n_plots)
+
+    for key, s in specs.items():
+        if s['sym'] and s['mode'] not in ('all', 'grow'):
+            raise SystemExit(f"error: --plot-sym {key[0]} {key[1]}: needs "
+                             f"--plot-data-range-all or --plot-data-range-grow for the same axis")
+        if s['mode'] == 'fixed' and s['log'] and s['min'] <= 0:
+            raise SystemExit(f"error: plot {key[0]} axis {key[1]}: a fixed range on a log axis "
+                             f"needs MIN > 0, got {s['min']:g}")
+    return specs
+
+
+def build_chart_titles(args):
+    """Return {plot number: title} from --plot-title (indices validated by build_plot_specs)."""
+    return {int(item[0]): normalize_title(item[1]) for item in (args.plot_title or [])}
+
+
+def apply_plot_static(specs, plots, chart_titles):
+    """Apply the static plot settings: fixed/auto ranges, log scale, axis and chart titles.
+    'all'/'grow' ranges are applied separately."""
+    for (n, axis), s in sorted(specs.items()):
+        view = plots[n - 1]
+        if s['log'] is not None:
+            setattr(view, axis + 'AxisLogScale', 1 if s['log'] else 0)
+        if s['mode'] == 'fixed':
+            if s['log'] is None and getattr(view, axis + 'AxisLogScale', 0) and s['min'] <= 0:
+                raise SystemExit(f"error: plot {n} axis {axis} is logarithmic: a fixed range "
+                                 f"needs MIN > 0, got {s['min']:g}")
+            apply_plot_axis_range(view, axis, s['min'], s['max'])
+        elif s['mode'] == 'auto':
+            setattr(view, axis + 'AxisUseCustomRange', 0)
+        if s['title'] is not None:
+            setattr(view, axis + 'AxisTitle', s['title'])
+    for n, title in chart_titles.items():
+        plots[n - 1].ChartTitle = title
+
+
+def apply_colorbar_titles(args, colorbars, views):
+    """Set --cb-title on the scalar bars already shown in views. Never creates one."""
+    for item in (args.cb_title or []):
+        n, text = int(item[0]), normalize_title(item[1])
+        lut = colorbars[n - 1]['lut']
+        found = False
+        for view in views:
+            for rep in view.Representations:
+                if rep.GetXMLName() == 'ScalarBarWidgetRepresentation' and rep.LookupTable == lut:
+                    rep.Title = text
+                    found = True
+        if not found:
+            warn(f"colorbar {n}: no scalar bar is shown for '{colorbars[n - 1]['array_name']}'; "
+                 f"--cb-title ignored")
+
+
+# -- Plot data ranges (--plot-data-range-all / -grow / --plot-sym) --
+
+def pad_range(lo, hi, frac=0.05, log=False):
+    """Add frac of the span on each side of [lo, hi]. With log=True the margin is added in
+    log10 space, which needs lo > 0 (ValueError otherwise)."""
+    if log:
+        if lo <= 0 or hi <= 0:
+            raise ValueError(f"pad_range: a log range needs positive bounds, got [{lo}, {hi}]")
+        a, b = math.log10(lo), math.log10(hi)
+        span = b - a
+        return 10 ** (a - frac * span), 10 ** (b + frac * span)
+    span = hi - lo
+    return lo - frac * span, hi + frac * span
+
+
+# Series corners follow vtkChart's plot corners. Verified in ParaView 6.1 by setting
+# SeriesPlotCorner and reading vtkChartXY.GetPlotCorner(plot) and the plot's X/Y axis
+# positions: 0 = bottom-left (X bottom, Y left), 1 = bottom-right (X bottom, Y right),
+# 2 = top-right (X top, Y right), 3 = top-left (X top, Y left).
+_Y_AXIS_CORNERS = {'Left': ('0', '3'), 'Right': ('1', '2')}
+_X_AXIS_CORNERS = {'Bottom': ('0', '1'), 'Top': ('2', '3')}
+
+
+def _series_corners(plot_corners):
+    """{series: corner} from the flat [name, corner, ...] SeriesPlotCorner list."""
+    flat = [str(v) for v in plot_corners]
+    return dict(zip(flat[0::2], flat[1::2]))
+
+
+def axis_series(series_visibility, plot_corners, axis):
+    """The visible series plotted against Y axis 'Left' or 'Right'. plot_corners is the
+    flat [name, corner, ...] SeriesPlotCorner list; unlisted series are on corner '0'.
+    'Bottom'/'Top' are X axes, whose range comes from the X array: returns []."""
+    if axis not in _Y_AXIS_CORNERS:
+        return []
+    corners = _series_corners(plot_corners)
+    return [s for s in series_visibility if corners.get(s, '0') in _Y_AXIS_CORNERS[axis]]
+
+
+def x_axis_has_series(series_visibility, plot_corners, axis):
+    """True if a visible series is plotted against X axis 'Bottom' (corners 0/1) or 'Top'
+    (corners 2/3), i.e. the representation's X array is shown on that axis."""
+    corners = _series_corners(plot_corners)
+    return any(corners.get(s, '0') in _X_AXIS_CORNERS[axis] for s in series_visibility)
+
+
+_SERIES_SUFFIX = re.compile(r' \((stats|id=\d+)\)$')
+_COMPONENT_SUFFIX = {'X': 0, 'Y': 1, 'Z': 2, 'Magnitude': -1}
+
+
+def split_series_name(series, array_names):
+    """
+    Resolve a chart series name to (array name, component) against array_names, or None.
+    A trailing " (stats)" or " (id=<n>)" (Plot Data Over Time blocks) is stripped. An exact
+    array name gives component -1; otherwise the part after the last '_' must be X, Y, Z,
+    Magnitude or an integer (component 0, 1, 2, -1 or that integer). 'Points' may be in
+    array_names and then stands for the point coordinates (series Points_X etc.).
+    """
+    name = _SERIES_SUFFIX.sub('', series)
+    if name in array_names:
+        return name, -1
+    base, sep, suffix = name.rpartition('_')
+    if not sep or base not in array_names:
+        return None
+    if suffix in _COMPONENT_SUFFIX:
+        return base, _COMPONENT_SUFFIX[suffix]
+    if suffix.isdigit():
+        return base, int(suffix)
+    return None
+
+
+_BLOCK_SUFFIX = re.compile(r'^(.*) \(([^()]*)\)$')
+
+
+def split_block_suffix(series):
+    """Split a chart series name of composite data into (name, block label), e.g.
+    'z-Displacement [m] (id=0)' -> ('z-Displacement [m]', 'id=0'), 'N (stats)' ->
+    ('N', 'stats'), 'X (vtkMultiBlockDataSet)' -> ('X', 'vtkMultiBlockDataSet'). A name
+    without a trailing ' (<label>)' gives (series, None). The label is the block's label
+    in the data hierarchy (its node name when it has no label)."""
+    m = _BLOCK_SUFFIX.match(series)
+    return (m.group(1), m.group(2)) if m else (series, None)
+
+
+def _prop_text(proxy, name):
+    """First value of a string property as text ('' if unset)."""
+    value = proxy.GetPropertyValue(name)
+    if isinstance(value, str):
+        return value
+    value = list(value or [])
+    return str(value[0]) if value else ''
+
+
+def _subset_info(src, port, selector, assembly='Hierarchy'):
+    try:
+        return src.SMProxy.GetSubsetDataInformation(port, selector, assembly)
+    except Exception:
+        return None
+
+
+def _chart_blocks(rep, src, port):
+    """
+    The data a chart representation shows. Returns (infos, labels):
+        infos  – vtkPVDataInformation of the selected blocks (one per BlockSelectors
+                 entry) for composite data, else [whole output]
+        labels – None for non-composite data; else {block label: hierarchy path of that
+                 block if rep shows it (it is, or lies under, a selected block), else None}.
+                 Series of composite data are named '<array> (<block label>)'.
+    """
+    full = src.GetDataInformation(port).DataInformation
+    if not full.IsCompositeDataSet():
+        return [full], None
+    props = rep.ListProperties()
+    selectors = [str(s) for s in rep.BlockSelectors] if 'BlockSelectors' in props else []
+    assembly = (_prop_text(rep, 'Assembly') if 'Assembly' in props else '') or 'Hierarchy'
+    infos = [i for i in (_subset_info(src, port, s, assembly) for s in selectors) if i]
+    hierarchy = full.GetHierarchy()
+    if hierarchy is None:
+        return infos or [full], {}
+    selected = None  # selectors of another assembly can't be mapped: treat all as shown
+    if assembly == 'Hierarchy':
+        selected = [hierarchy.GetNodePath(n) for n in hierarchy.SelectNodes(selectors or ['/'])]
+    labels = {}
+    for node in [0] + list(hierarchy.GetChildNodes(0, True)):
+        path = hierarchy.GetNodePath(node)
+        label = hierarchy.GetAttributeOrDefault(node, 'label', hierarchy.GetNodeName(node))
+        shown = selected is None or any(path == p or path.startswith(p + '/') for p in selected)
+        if labels.get(label) is None:
+            labels[label] = path if shown else None
+    return infos or [full], labels
+
+
+_PDOT_BLOCK = re.compile(r'stats|id=\d+')
+
+
+def _resolve_series(src, port, infos, labels, attribute, series):
+    """Range of one chart series. Returns (range or None, drawn). drawn is False when the
+    series names a block that the representation does not show (or that does not exist,
+    e.g. a stale '(stats)' series after turning "Only Report Selection Statistics" off):
+    such a series draws nothing, so it is skipped without a warning."""
+    if labels is not None:
+        name, label = split_block_suffix(series)
+        if label is not None and label in labels:
+            if labels[label] is None:
+                return None, False
+            info = _subset_info(src, port, labels[label])
+            if info is None:
+                return None, False
+            return _series_range([info], attribute, name), True
+        if label is not None:
+            # No block has this label: a Plot Data Over Time block missing from the output,
+            # or an array name with parentheses, e.g. 'p (bar)'.
+            if _PDOT_BLOCK.fullmatch(label):
+                return None, False
+            r = _series_range(infos, attribute, series)
+            return r, r is not None
+    return _series_range(infos, attribute, series), True
+
+
+_ATTRIBUTE_INFO = {'Point Data': 'GetPointDataInformation',
+                   'Cell Data': 'GetCellDataInformation',
+                   'Row Data': 'GetRowDataInformation'}
+
+_warned_series = set()
+
+
+def _range_union(a, b):
+    if b is None or b[0] > b[1]:
+        return a
+    return b if a is None else (min(a[0], b[0]), max(a[1], b[1]))
+
+
+def _array_component_range(attr_info, name, comp):
+    arr = attr_info.GetArrayInformation(name)
+    if arr is None or comp >= arr.GetNumberOfComponents():
+        return None
+    return tuple(arr.GetComponentRange(comp))
+
+
+def _series_range(infos, attribute, series):
+    """Union of the data range of one series over infos, or None if unresolvable."""
+    getter = _ATTRIBUTE_INFO.get(attribute)
+    if getter is None:
+        return None
+    out = None
+    for info in infos:
+        attr_info = getattr(info, getter)()
+        names = [attr_info.GetArrayInformation(i).GetName()
+                 for i in range(attr_info.GetNumberOfArrays())]
+        coords = attribute == 'Point Data' and 'Points' not in names
+        hit = split_series_name(series, names + (['Points'] if coords else []))
+        if hit is None:
+            # Plot Data Over Time statistics block (series "<array> (stats)", or plain
+            # "<array>" when the output has only that block): the row arrays are
+            # min(<array>), max(<array>), avg(...), ...; min .. max bound every drawn curve
+            # and band.
+            stats = [a[4:-1] for a in names if a.startswith('min(') and a.endswith(')')]
+            stat = split_series_name(series, stats)
+            if stat is not None:
+                for fn in ('min', 'max'):
+                    out = _range_union(out, _array_component_range(
+                        attr_info, f"{fn}({stat[0]})", stat[1]))
+            continue
+        name, comp = hit
+        if coords and name == 'Points':
+            if comp in (0, 1, 2):
+                b = info.GetBounds()
+                out = _range_union(out, (b[2 * comp], b[2 * comp + 1]))
+            else:
+                pts = info.GetPointArrayInformation()
+                if pts is not None:
+                    out = _range_union(out, tuple(pts.GetComponentRange(comp)))
+        else:
+            out = _range_union(out, _array_component_range(attr_info, name, comp))
+    return out
+
+
+def _index_range(infos, attribute):
+    """[0, n - 1] for the largest number of points/cells/rows over infos, or None."""
+    getter = {'Point Data': 'GetNumberOfPoints', 'Cell Data': 'GetNumberOfCells',
+              'Row Data': 'GetNumberOfRows'}.get(attribute)
+    if getter is None:
+        return None
+    n = max(getattr(info, getter)() for info in infos)
+    return (0.0, float(n - 1)) if n > 0 else None
+
+
+def _get_plot_axis_range_at_time(view, axis, t, label=None):
+    """
+    Data range (min, max) at time t of what chart view draws against axis, or None.
+    Y axes ('Left'/'Right'): the visible series on that axis (SeriesPlotCorner). X axes
+    ('Bottom'/'Top'): the X array (or the point/row index with UseIndexForXAxis) of each
+    representation with a visible series on that axis. Only representations with a
+    non-empty SeriesVisibility count. For composite data (e.g. Plot Data Over Time) a
+    series '<array> (<block label>)' uses only that block; a series whose block the
+    representation doesn't show (or that doesn't exist) draws nothing and is skipped
+    without a warning. Series in a shown block that can't be resolved warn once and are
+    skipped. label (e.g. 'plot 1 axis Left') prefixes the warnings.
+    """
+    label = label or f"plot axis {axis}"
+    out = None
+    for rep in view.Representations:
+        props = rep.ListProperties()
+        if 'SeriesVisibility' not in props or not _rep_is_drawn(rep):
+            continue
+        visible = [str(s) for s in rep.SeriesVisibility]
+        corners = list(rep.SeriesPlotCorner) if 'SeriesPlotCorner' in props else []
+        if axis in _X_AXIS_CORNERS:
+            if not x_axis_has_series(visible, corners, axis):
+                continue
+            use_index = bool(rep.UseIndexForXAxis) if 'UseIndexForXAxis' in props else False
+            series = [] if use_index else [_prop_text(rep, 'XArrayName')]
+        else:
+            use_index = False
+            series = axis_series(visible, corners, axis)
+            if not series:
+                continue
+        src, port = _rep_source(rep)
+        if src is None:
+            continue
+        src.UpdatePipeline(t)
+        infos, labels = _chart_blocks(rep, src, port)
+        if axis in _X_AXIS_CORNERS and labels:
+            # composite data: the X array of the shown blocks with a series on this axis
+            corner_of = _series_corners(corners)
+            on_axis = [split_block_suffix(v)[1] for v in visible
+                       if corner_of.get(v, '0') in _X_AXIS_CORNERS[axis]]
+            known = [b for b in on_axis if b in labels]
+            if known:
+                paths = sorted({labels[b] for b in known if labels[b] is not None})
+                if not paths:
+                    continue  # none of those series is drawn
+                infos = [i for i in (_subset_info(src, port, p) for p in paths) if i]
+        attribute = _prop_text(rep, 'AttributeType') if 'AttributeType' in props else ''
+
+        def warn_once(what):
+            key = (label, src.GetGlobalIDAsString(), what)
+            if key not in _warned_series:
+                _warned_series.add(key)
+                name = _source_names_by_id().get(src.GetGlobalIDAsString(), src.GetXMLName())
+                warn(f"{label}: {what} ({attribute or 'no attribute type'}) not found in the "
+                     f"data of '{name}'; ignored for the axis range")
+
+        if use_index:
+            r = _index_range(infos, attribute)
+            if r is None:
+                warn_once("the point/row index")
+            out = _range_union(out, r)
+        for s in series:
+            if axis in _X_AXIS_CORNERS:
+                r, drawn = _series_range(infos, attribute, s), True
+            else:
+                r, drawn = _resolve_series(src, port, infos, labels, attribute, s)
+            if r is None and drawn:
+                warn_once(f"series {s!r}")
+            out = _range_union(out, r)
+    return out
+
+
+def _finish_plot_range(lo, hi, sym, log):
+    """sym -> log clip -> margin. Returns ((lo, hi) or None, note); note is None,
+    'clipped' (log axis, lo <= 0 raised to hi / 1000), 'nonpositive' or 'degenerate'."""
+    if sym:
+        lo, hi = apply_sym(lo, hi)
+    note = None
+    if log and lo <= 0:
+        if hi <= 0:
+            return None, 'nonpositive'
+        lo, note = hi / 1000, 'clipped'
+    if not lo < hi:
+        return None, 'degenerate'
+    return pad_range(lo, hi, log=log), note
+
+
+def precompute_plot_ranges(specs, plots, frame_times):
+    """
+    Compute the --plot-data-range-all/-grow axis ranges over frame_times (main step 9).
+
+    Returns (static, dynamic):
+        static  – {(n, axis): (lo, hi)} for 'all' axes (union over frame_times)
+        dynamic – [{'view': registration name, 'axis': axis, 'log': bool,
+                    'entries': [[t, lo, hi], ...]}, ...] for 'grow' axes
+    Ranges get --plot-sym, then a 5 % margin (in log space on a log axis). On a log axis a
+    computed lower bound <= 0 is clipped to hi / 1000 with a warning. An axis without a
+    usable range (no series, no data, min == max) warns and is left as in the state.
+    """
+    from paraview import servermanager
+    pm = servermanager.ProxyManager()
+    static, dynamic = {}, []
+    for (n, axis), s in sorted(specs.items()):
+        if s['mode'] not in ('all', 'grow'):
+            continue
+        view = plots[n - 1]
+        label = f"plot {n} axis {axis}"
+        log = s['log'] if s['log'] is not None else bool(getattr(view, axis + 'AxisLogScale', 0))
+        raw = []
+        for t in frame_times:
+            r = _get_plot_axis_range_at_time(view, axis, t, label)
+            if r is not None:
+                raw.append([t, r[0], r[1]])
+        if not raw:
+            warn(f"{label}: no data range found (no visible series on this axis, or their "
+                 f"data could not be read); axis left as in state")
+            continue
+        if len(raw) < len(frame_times):
+            warn(f"{label}: no data range found in {len(frame_times) - len(raw)} frame(s); "
+                 f"those frames skipped")
+        if s['mode'] == 'all':
+            entries = [[None, min(e[1] for e in raw), max(e[2] for e in raw)]]
+        else:
+            entries = grow_entries(raw)
+        finished, notes = [], {}
+        for t, lo, hi in entries:
+            r, note = _finish_plot_range(lo, hi, s['sym'], log)
+            if note:
+                notes[note] = notes.get(note, 0) + 1
+            if r is not None:
+                finished.append([t, r[0], r[1]])
+        frames = {k: "" if s['mode'] == 'all' else f" in {v} frame(s)" for k, v in notes.items()}
+        rest = "those frames skipped" if finished else "axis left as in state"
+        if 'clipped' in notes:
+            warn(f"{label}: log axis, but the data range reaches <= 0{frames['clipped']}; "
+                 f"lower bound clipped to max / 1000")
+        if 'nonpositive' in notes:
+            warn(f"{label}: log axis, but the data is all <= 0{frames['nonpositive']}; {rest}")
+        if 'degenerate' in notes:
+            warn(f"{label}: the data range is a single value (min == max)"
+                 f"{frames['degenerate']}; {rest}")
+        if not finished:
+            continue
+        if s['mode'] == 'all':
+            static[(n, axis)] = (finished[0][1], finished[0][2])
+            continue
+        name = pm.GetProxyName('views', view)
+        if not name:
+            warn(f"{label}: the view has no registration name; per-frame range not applied")
+            continue
+        dynamic.append({'view': name, 'axis': axis, 'log': log, 'entries': finished})
+    return static, dynamic
+
+
+def apply_plot_axis_range(view, axis, lo, hi):
+    """Set a custom range [lo, hi] on axis of a chart view."""
+    setattr(view, axis + 'AxisUseCustomRange', 1)
+    setattr(view, axis + 'AxisRangeMinimum', lo)
+    setattr(view, axis + 'AxisRangeMaximum', hi)
+
+
+# ----------------------------------------------------------------
+# Camera fit
+# ----------------------------------------------------------------
+
+def _vsub(a, b):
+    return [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
+
+
+def _vdot(a, b):
+    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+
+
+def _vscale(a, k):
+    return [a[0] * k, a[1] * k, a[2] * k]
+
+
+def _vunit(a):
+    n = math.sqrt(_vdot(a, a))
+    return [a[0] / n, a[1] / n, a[2] / n]
+
+
+def _vcross(a, b):
+    return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
+
+
+def fit_camera(position, focal_point, view_up, view_angle, parallel, parallel_scale, aspect,
+               bounds, margin_pct, mode):
+    """
+    Fit the camera to bounds [xmin, xmax, ymin, ymax, zmin, zmax], keeping the view
+    direction and view up. aspect is width / height; margin_pct is the margin on each side
+    in percent of the viewport. mode:
+        'fit' – center on the bounds and move in or out until the bounds just fit
+        'out' – keep the focal point; only move out (or widen the parallel scale) if the
+                bounds don't fit; otherwise return the inputs unchanged
+    Returns {'position': [x, y, z], 'focal_point': [x, y, z], 'parallel_scale': float}.
+    """
+    focal_point, position = list(focal_point), list(position)
+    to_focal = _vsub(focal_point, position)
+    dist0 = math.sqrt(_vdot(to_focal, to_focal))
+    d = _vunit(to_focal)
+    up = _vsub(view_up, _vscale(d, _vdot(view_up, d)))
+    if _vdot(up, up) < 1e-24:  # view up parallel to the view direction: pick any normal
+        axis = min(range(3), key=lambda i: abs(d[i]))
+        e = [0.0, 0.0, 0.0]
+        e[axis] = 1.0
+        up = _vsub(e, _vscale(d, d[axis]))
+    u = _vunit(up)
+    r = _vcross(d, u)
+
+    s = 1 - 2 * margin_pct / 100   # usable fraction of each half-extent
+    tv = math.tan(math.radians(view_angle) / 2)
+    th = tv * aspect
+    if mode == 'fit':
+        center = [(bounds[0] + bounds[1]) / 2, (bounds[2] + bounds[3]) / 2,
+                  (bounds[4] + bounds[5]) / 2]
+    else:
+        center = focal_point
+
+    corners = []
+    for cx in bounds[0:2]:
+        for cy in bounds[2:4]:
+            for cz in bounds[4:6]:
+                v = _vsub([cx, cy, cz], center)
+                corners.append((_vdot(v, r), _vdot(v, u), _vdot(v, d)))
+
+    unchanged = {'position': position, 'focal_point': focal_point,
+                 'parallel_scale': parallel_scale}
+    if not parallel:
+        need = max(max(abs(x) / (th * s), abs(y) / (tv * s)) - z for x, y, z in corners)
+        dist = need if mode == 'fit' else max(dist0, need)
+        if mode != 'fit' and dist == dist0:
+            return unchanged
+        scale = parallel_scale
+    else:
+        need = max(max(abs(x) / (aspect * s), abs(y) / s) for x, y, z in corners)
+        scale = need if mode == 'fit' else max(parallel_scale, need)
+        # Keep the camera distance unless the nearest corner is closer than 5 % of the
+        # bounds diagonal (or behind the camera); then move back to one full diagonal of
+        # clearance. VTK's near plane is >= ~0.001 * far, so a tiny clearance would still
+        # clip the nearest corner. Moving a parallel camera back doesn't change the image.
+        diag = math.sqrt((bounds[1] - bounds[0]) ** 2 + (bounds[3] - bounds[2]) ** 2
+                         + (bounds[5] - bounds[4]) ** 2)
+        nearest = max(-z for x, y, z in corners)
+        dist = nearest + diag if dist0 < nearest + 0.05 * diag else dist0
+        if mode != 'fit' and scale == parallel_scale and dist == dist0:
+            return unchanged
+    return {'position': _vsub(center, _vscale(d, dist)), 'focal_point': list(center),
+            'parallel_scale': scale}
+
+
+def _rep_source(rep):
+    """Return (source proxy, output port) feeding rep's Input."""
+    from paraview import servermanager
+    prop = rep.SMProxy.GetProperty('Input')
+    return (servermanager._getPyProxy(prop.GetProxy(0)),
+            prop.GetOutputPortForConnection(0))
+
+
+def _rep_transform_props(rep):
+    """Names of rep's Translation/Position, Scale, Orientation, UserTransform properties
+    that are not identity."""
+    identity = {'Translation': [0.0] * 3, 'Position': [0.0] * 3, 'Scale': [1.0] * 3,
+                'Orientation': [0.0] * 3,
+                'UserTransform': [1.0, 0, 0, 0, 0, 1.0, 0, 0, 0, 0, 1.0, 0, 0, 0, 0, 1.0]}
+    props = rep.ListProperties()
+    out = []
+    for name, ident in identity.items():
+        if name not in props:
+            continue
+        try:
+            value = [float(v) for v in rep.GetPropertyValue(name)]
+        except (TypeError, ValueError):
+            continue
+        if len(value) == len(ident) and value != ident:
+            out.append(name)
+    return out
+
+
+def collect_view_bounds(view, frame_times):
+    """
+    Return the union over frame_times of the data bounds of the visible representations
+    (with an Input) in view, as [xmin, xmax, ymin, ymax, zmin, zmax], or None if nothing
+    visible has valid bounds. Warns once per representation with a non-identity
+    Translation/Scale/Orientation: the bounds are those of the data, not of the displayed
+    geometry.
+    """
+    names = _source_names_by_id()
+    lo, hi = [float('inf')] * 3, [float('-inf')] * 3
+    for rep in view.Representations:
+        props = rep.ListProperties()
+        if 'Input' not in props or 'Visibility' not in props or not rep.Visibility:
+            continue
+        src, port = _rep_source(rep)
+        if src is None:
+            continue
+        contributed = False
+        for t in frame_times:
+            src.UpdatePipeline(t)
+            b = src.GetDataInformation(port).GetBounds()
+            if b[0] > b[1] or b[2] > b[3] or b[4] > b[5]:
+                continue
+            contributed = True
+            for i in range(3):
+                lo[i] = min(lo[i], b[2 * i])
+                hi[i] = max(hi[i], b[2 * i + 1])
+        if contributed:
+            transformed = _rep_transform_props(rep)
+            if transformed:
+                name = names.get(src.GetGlobalIDAsString(), src.GetXMLName())
+                warn(f"--fit-camera: the representation of '{name}' has a non-identity "
+                     f"transform ({', '.join(transformed)}); the fit uses its untransformed "
+                     f"data bounds, so it may be off")
+    if lo[0] == float('inf'):
+        return None
+    return [lo[0], hi[0], lo[1], hi[1], lo[2], hi[2]]
+
+
+def apply_camera_fit(views, frame_times, mode, margin_pct):
+    """--fit-camera: fit the camera of every render view in views (main step 10)."""
+    scene = GetAnimationScene()
+    saved_time = scene.TimeKeeper.Time
+    for i, view in enumerate(views):
+        if not view.IsA("vtkSMRenderViewProxy"):
+            continue
+        Render(view)  # so that ViewSize is current
+        w, h = view.ViewSize
+        bounds = collect_view_bounds(view, frame_times)
+        label = f"view {i + 1} ({view.GetXMLName()})"
+        if bounds is None:
+            warn(f"--fit-camera: {label}: nothing visible with valid bounds; camera unchanged")
+            continue
+        if bounds[0] == bounds[1] and bounds[2] == bounds[3] and bounds[4] == bounds[5]:
+            warn(f"--fit-camera: {label}: the visible data is a single point; camera unchanged")
+            continue
+        position = list(view.CameraPosition)
+        focal_point = list(view.CameraFocalPoint)
+        parallel_scale = float(view.CameraParallelScale)
+        cam = fit_camera(position, focal_point, list(view.CameraViewUp),
+                         float(view.CameraViewAngle), bool(view.CameraParallelProjection),
+                         parallel_scale, w / h, bounds, margin_pct, mode)
+        if (cam['position'] == position and cam['focal_point'] == focal_point
+                and cam['parallel_scale'] == parallel_scale):
+            continue  # 'out' with nothing to do: leave the camera untouched
+        view.CameraPosition = cam['position']
+        view.CameraFocalPoint = cam['focal_point']
+        view.CameraParallelScale = cam['parallel_scale']
+        Render(view)  # also resets the clipping range to the visible bounds
+    scene.TimeKeeper.Time = saved_time
+
+
+# ----------------------------------------------------------------
 # Argument parsing
 # ----------------------------------------------------------------
 
-def parse_args():
+def parse_args(argv=None):
     parser = argparse.ArgumentParser()
 
     # -- Positional --
@@ -707,6 +1917,17 @@ def parse_args():
         help="Dict-formatted string `{ 'readername1': 'filepath1', ... }` to specify filenames \
             explicitly.",
         default=None)
+    g_input.add_argument('--keep-path',
+        help="Reader name (see --list-readers) whose file may stay outside --datadir, e.g. a \
+            shared reference file. Its file must still exist. Repeatable.",
+        metavar='READER', action='append', default=[])
+    g_input.add_argument('--allow-missing-data',
+        help="Warn instead of failing when data files are missing or readers still point \
+            outside --datadir.",
+        action='store_true')
+    g_input.add_argument('--list-readers',
+        help="Print the index, name, used flag, and file path of every reader, then continue.",
+        action='store_true')
 
     # -- Output --
     g_output = parser.add_argument_group('output')
@@ -730,12 +1951,28 @@ def parse_args():
     g_layout.add_argument('--time',
         help="Set the time to render, e.g. 10.0. Default: end time",
         default=float('inf'), type=float)
+    g_layout.add_argument('--interp-interval',
+        help="Set the Discrete Time Step Interval (DT) of every Temporal Interpolator in the state,             giving evenly spaced animation steps. 0 keeps the original time steps.             Error if the state has no Temporal Interpolator. Default: not set",
+        metavar='DT', type=float, default=None)
     g_layout.add_argument('--size',
-        help="Layout size in pixels. Pass one int for width (height scaled to preserve aspect ratio) \
+        help="Layout size in pixels. Pass one int for the longest side (other side scaled to preserve aspect ratio) \
             or two ints for exact width and height (aspect ratio not preserved). \
             You can preview a size in the Paraview GUI by clicking \"View -> Preview\". Default: 1920",
         metavar='INT',
         nargs='+', type=int, default=[1920])
+    g_layout.add_argument('--fit-camera',
+        help="Fit the camera of every rendered 3D view to the visible data, using the data \
+            bounds over the frame window (computed once, no per-frame motion); the view \
+            direction is kept. 'fit': center on the data and move in or out until it just fits. \
+            'out': only move out if the data doesn't fit; otherwise keep the state's camera. \
+            Only the data bounds are fitted, not annotations (colorbar, axes grid labels, \
+            text): with a colorbar or axes grid shown, use --fit-margin 10 to 20. \
+            Default: not set (camera as in the state)",
+        choices=['fit', 'out'], default=None)
+    g_layout.add_argument('--fit-margin',
+        help="Margin for --fit-camera on each side, in percent of the view size \
+            (0 <= PCT < 50). Default: 5",
+        metavar='PCT', type=float, default=5.0)
     g_layout.add_argument('--palette',
         help="Color palette for rendering. Aliases: white, black, gray/grey (WarmGray), gradient. \
             Default: WarmGrayBackground",
@@ -762,8 +1999,8 @@ def parse_args():
         choices=['png', 'bmp', 'jpg', 'jpeg', 'tif', 'tiff', 'vtk'],
         default='png')
     g_image.add_argument('--image-resolution',
-        help="Image resolution for saving rendered files. Pass one int for width (height scaled to \
-            preserve aspect ratio) or two ints for exact size. If not specified (or 0), use the size \
+        help="Image resolution for saving rendered files. Pass one int for the longest side (the other \
+            side scaled to preserve aspect ratio) or two ints for exact size. If not specified (or 0), use the size \
             of the layout (see --size) or the size of the selected view (see --view).",
         metavar='INT',
         nargs='+', type=int, default=[0])
@@ -863,13 +2100,57 @@ def parse_args():
              "(usable with --cb-colormap), then continue.",
         action='store_true')
 
+    g_cb.add_argument('--cb-title',
+        help="Set the title of colorbar N (a blank text clears it). N is 1-based. Repeatable.",
+        nargs=2, metavar=('N', 'TEXT'),
+        action='append', default=None)
+
+    # -- Plots --
+    g_plot = parser.add_argument_group('plots')
+    g_plot.add_argument('--list-plots',
+        help="Print the index, type, title and axis settings of each plot (chart view) in the "
+             "selected layout/view, then continue.",
+        action='store_true')
+    g_plot.add_argument('--plot-range',
+        help="Fix plot N's AXIS (x, y, left, bottom, right, top) to [MIN MAX]. Repeatable.",
+        nargs=4, metavar=('N', 'AXIS', 'MIN', 'MAX'), action='append', default=None)
+    g_plot.add_argument('--plot-data-range-all',
+        help="Set plot N's AXIS range to the data range over all frames of the frame window "
+             "(plus a 5%% margin). Repeatable.",
+        nargs=2, metavar=('N', 'AXIS'), action='append', default=None)
+    g_plot.add_argument('--plot-data-range-grow',
+        help="Per-frame: grow plot N's AXIS range to include each frame's data (plus a 5%% "
+             "margin). Repeatable.",
+        nargs=2, metavar=('N', 'AXIS'), action='append', default=None)
+    g_plot.add_argument('--plot-auto',
+        help="Use the automatic range for plot N's AXIS (overrides a custom range in the state). "
+             "Repeatable.",
+        nargs=2, metavar=('N', 'AXIS'), action='append', default=None)
+    g_plot.add_argument('--plot-sym',
+        help="Symmetrize plot N's AXIS range around zero. Needs --plot-data-range-all or "
+             "--plot-data-range-grow for the same axis. Repeatable.",
+        nargs=2, metavar=('N', 'AXIS'), action='append', default=None)
+    g_plot.add_argument('--plot-log',
+        help="Turn the logarithmic scale of plot N's AXIS on or off. Repeatable.",
+        nargs=3, metavar=('N', 'AXIS', 'on|off'), action='append', default=None)
+    g_plot.add_argument('--plot-title',
+        help="Set the title of plot N (a blank text clears it). Repeatable.",
+        nargs=2, metavar=('N', 'TEXT'), action='append', default=None)
+    g_plot.add_argument('--plot-axis-title',
+        help="Set the title of plot N's AXIS (a blank text clears it). Repeatable.",
+        nargs=3, metavar=('N', 'AXIS', 'TEXT'), action='append', default=None)
+
     # -- Parse and validate --
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     if len(args.size) > 2:
         parser.error("--size accepts 1 or 2 integers")
     if len(args.image_resolution) > 2:
         parser.error("--image-resolution accepts 1 or 2 integers")
+    if args.interp_interval is not None and args.interp_interval < 0:
+        parser.error("--interp-interval must be >= 0")
+    if not 0 <= args.fit_margin < 50:
+        parser.error(f"--fit-margin must be >= 0 and < 50, got {args.fit_margin:g}")
     if args.datadir and args.filenames:
         parser.error("--datadir and --filenames are mutually exclusive")
 
@@ -883,10 +2164,16 @@ def parse_args():
 # Main
 # ----------------------------------------------------------------
 
-def main():
-    args = parse_args()
+def main(argv=None):
+    args = parse_args(argv)
 
-    outputname = os.path.splitext(args.outputname)[0]
+    if paraview is not None:
+        v = GetParaViewVersion()
+        msg = paraview_version_warning((v.major, v.minor))
+        if msg:
+            warn(msg)
+
+    outputname = strip_output_extension(args.outputname)
     if args.suffix:
         outputname += "_" + datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 
@@ -918,16 +2205,9 @@ def main():
     # ----------------------------------------------------------------
 
     # Pick the layout by index or name
-    try:
-        i_layout = int(args.layout) - 1
-        layouts = GetLayouts()
-        layout = list(layouts.values())[i_layout]
-    except ValueError:
-        layout = GetLayoutByName(str(args.layout))
-        if layout is None:
-            raise SystemExit(f"error: Layout '{args.layout}' not found by name")
-    except IndexError:
-        raise SystemExit(f"error: Layout index {args.layout} out of range, must be between 1 and {len(layouts)}")
+    layout_items = list(GetLayouts().items())
+    layout_names = [key[0] for key, _ in layout_items]
+    layout = layout_items[resolve_layout_index(args.layout, layout_names)][1]
 
     if args.list_views:
         print_views(layout, GetViewsInLayout(layout))
@@ -936,15 +2216,6 @@ def main():
     for other in GetLayouts().values():
         if other is not layout:
             RemoveLayout(other)
-
-    if len(args.size) == 1:
-        width = args.size[0]
-        current_w, current_h = layout.GetSize()
-        height = round(width * current_h / current_w)
-        layout.SetSize(width, height)
-    else:
-        layout.SetSize(*args.size)
-    LoadPalette(args.palette)
 
     # Pick the view in the layout by index (if specified)
     if args.view > 0:
@@ -959,6 +2230,29 @@ def main():
         is_layout = True
         layout_or_view = layout
 
+    # Views being rendered: the selected view, or all views in the selected layout
+    rendered_views = GetViewsInLayout(layout) if is_layout else [layout_or_view]
+
+    # --list-readers, --keep-path, missing data and template-run fallback checks
+    check_readers(args, rendered_views, datadir)
+
+    # --interp-interval (before anything reads TimestepValues)
+    if args.interp_interval is not None:
+        apply_interp_interval(args.interp_interval)
+        # Make the animation follow the new time steps (play mode, frame count, end time)
+        GetAnimationScene().UpdateAnimationUsingDataTimeSteps()
+        extra = unsuppressed_time_sources()
+        if extra:
+            warn('these sources still add their own time steps to the animation '
+                 '(set "Ignore Time" on them in ParaView): ' + ', '.join(extra))
+
+    if len(args.size) == 1:
+        current_w, current_h = layout.GetSize()
+        layout.SetSize(*fit_to_box(current_w, current_h, args.size[0]))
+    else:
+        layout.SetSize(*args.size)
+    LoadPalette(args.palette)
+
     # Get the actual resolution for saving images and animations
     ir = args.image_resolution
     if ir[0] < 1:
@@ -971,7 +2265,7 @@ def main():
             base = layout_or_view.ViewSize
         else:
             base = layout_or_view.GetSize()
-        image_res = (ir[0], round(ir[0] * base[1] / base[0]))
+        image_res = fit_to_box(base[0], base[1], ir[0])
     else:
         image_res = tuple(ir)
 
@@ -982,37 +2276,72 @@ def main():
     else:
         animation_scene.TimeKeeper.Time = args.time
 
-    n_timesteps = len(animation_scene.TimeKeeper.TimestepValues)
-    frame_end = n_timesteps - 1 if args.frame_end < 0 else args.frame_end
-    framewindow = [args.frame_start, frame_end]
+    # The frames SaveAnimation's FrameWindow counts: the time steps in 'Snap To TimeSteps'
+    # mode (also after --interp-interval), the scene's NumberOfFrames in 'Sequence' mode
+    frame_times = animation_frame_times(animation_scene)
+    frame_start, frame_end = resolve_frame_window(
+        args.frame_start, args.frame_end, args.frame_stride, max(1, len(frame_times)))
+    framewindow = [frame_start, frame_end]
+
+    # Charts: push the block selection ParaView restores once the data is read (after the
+    # data checks, so missing files fail cleanly first; before the plot ranges)
+    refresh_chart_representations(rendered_views, animation_scene.TimeKeeper.Time)
 
     # ----------------------------------------------------------------
     # Colorbar limits
     # ----------------------------------------------------------------
 
-    views_for_cb = GetViewsInLayout(layout) if is_layout else [layout_or_view]
+    views_for_cb = rendered_views
     colorbars = enumerate_colorbars(views_for_cb)
 
     validate_colorbar_args(args, len(colorbars))
+
+    # Validate the plot arguments too before any colorbar change or per-frame precompute
+    plots = enumerate_plots(rendered_views)
+    plot_specs = build_plot_specs(args, len(plots))
 
     if args.list_colorbars:
         print_colorbars(colorbars)
 
     apply_colorbar_colormaps(args, colorbars)
     apply_colorbar_discretize(args, colorbars)
+    apply_colorbar_titles(args, colorbars, views_for_cb)
     apply_static_colorbar_limits(args, colorbars, views_for_cb)
 
     # Precompute per-frame ranges for --cb-data-range-clamp / --cb-data-range-grow.
     # Always computed over the animation frame window so that grow accumulates from
     # frame_start and the nearest-time lookup is consistent for --save-image too.
-    timestep_values = list(animation_scene.TimeKeeper.TimestepValues)
     anim_frame_times = (
-        timestep_values[args.frame_start : frame_end + 1 : args.frame_stride]
-        if timestep_values else [animation_scene.TimeKeeper.Time]
+        frame_times[frame_start : frame_end + 1 : args.frame_stride]
+        if frame_times else [animation_scene.TimeKeeper.Time]
     )
     dynamic_ranges = precompute_dynamic_colorbar_ranges(
         args, colorbars, views_for_cb, animation_scene, anim_frame_times
     )
+
+    # ----------------------------------------------------------------
+    # Plots: static settings, data ranges, per-frame precompute
+    # ----------------------------------------------------------------
+
+    if args.list_plots:
+        print_plots(plots)
+    apply_plot_static(plot_specs, plots, build_chart_titles(args))
+
+    # --plot-data-range-all (applied now) and -grow (per frame, with the colorbar ranges)
+    static_plot_ranges, dynamic_plot_ranges = precompute_plot_ranges(
+        plot_specs, plots, anim_frame_times)
+    for (n, axis), (lo, hi) in static_plot_ranges.items():
+        apply_plot_axis_range(plots[n - 1], axis, lo, hi)
+
+    dynamic = {'colorbars': dynamic_ranges or {}, 'plots': dynamic_plot_ranges}
+    has_dynamic = bool(dynamic['colorbars'] or dynamic['plots'])
+
+    # ----------------------------------------------------------------
+    # Camera fit (once, from the bounds over the same frame window)
+    # ----------------------------------------------------------------
+
+    if args.fit_camera:
+        apply_camera_fit(rendered_views, anim_frame_times, args.fit_camera, args.fit_margin)
 
     # ----------------------------------------------------------------
     # Postprocessing actions
@@ -1043,8 +2372,8 @@ def main():
         file_img = abspath(outputname) + '.' + args.image_format
         os.makedirs(dirname(file_img), exist_ok=True)
 
-        if dynamic_ranges:
-            apply_dynamic_colorbar_ranges_at_time(dynamic_ranges, animation_scene.TimeKeeper.Time)
+        if has_dynamic:
+            apply_dynamic_ranges_at_time(dynamic, animation_scene.TimeKeeper.Time)
 
         print("Saving screenshot to:", file_img)
 
@@ -1081,8 +2410,7 @@ def main():
         if is_video:
             ani_kwargs['BitRate'] = bitrate
 
-        dynamic_cue = build_dynamic_colorbar_cue(dynamic_ranges, animation_scene) \
-            if dynamic_ranges else None
+        dynamic_cue = build_dynamic_cue(dynamic, animation_scene) if has_dynamic else None
 
         SaveAnimation(file_ani, layout_or_view, **ani_kwargs)
 
